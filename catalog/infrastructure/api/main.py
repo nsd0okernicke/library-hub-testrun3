@@ -11,6 +11,7 @@ from sqlalchemy.pool import NullPool
 
 from catalog.application.check_book_availability import CheckBookAvailability
 from catalog.application.create_book import CreateBook
+from catalog.application.handle_book_returned import HandleBookReturnedEvent
 from catalog.application.retrieve_book import RetrieveBook
 from catalog.application.search_books import SearchBooks
 from catalog.domain.book import InvalidBookDataError
@@ -35,6 +36,7 @@ def create_app(books: BookRepository) -> FastAPI:
     app.state.check_book_availability = CheckBookAvailability(books)
     app.state.retrieve_book = RetrieveBook(books)
     app.state.search_books = SearchBooks(books)
+    app.state.handle_book_returned = HandleBookReturnedEvent(books)
     app.include_router(books_router)
 
     async def conflict_handler(request: Request, exc: Exception) -> JSONResponse:

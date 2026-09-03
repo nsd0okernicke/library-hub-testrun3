@@ -13,7 +13,7 @@ def test_book_repository_cannot_be_instantiated_directly() -> None:
 
 
 class _PartialBookRepository(BookRepository):
-    """Concrete class that implements only two of the three port methods."""
+    """Concrete class that implements only two of the five port methods."""
 
     async def get_by_isbn(self, isbn: Isbn) -> Book | None:
         return None

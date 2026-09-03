@@ -10,8 +10,9 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
 from catalog.application.create_book import CreateBook
+from catalog.application.retrieve_book import RetrieveBook
 from catalog.domain.book import InvalidBookDataError
-from catalog.domain.exceptions import BookAlreadyExistsError
+from catalog.domain.exceptions import BookAlreadyExistsError, BookNotFoundError
 from catalog.domain.isbn import IsbnValidationError
 from catalog.domain.ports import BookRepository
 from catalog.infrastructure.api.routers.books import router as books_router
@@ -25,17 +26,23 @@ def create_app(books: BookRepository) -> FastAPI:
     """Build the catalog FastAPI app wired to the given repository port."""
     app = FastAPI(title="Catalog Service")
     app.state.create_book = CreateBook(books)
+    app.state.retrieve_book = RetrieveBook(books)
     app.include_router(books_router)
 
     async def conflict_handler(request: Request, exc: Exception) -> JSONResponse:
         """Map a duplicate-ISBN conflict to 409."""
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
+    async def not_found_handler(request: Request, exc: Exception) -> JSONResponse:
+        """Map a missing book to 404."""
+        return JSONResponse(status_code=404, content={"detail": str(exc)})
+
     async def bad_request_handler(request: Request, exc: Exception) -> JSONResponse:
         """Map invalid book data to 400."""
         return JSONResponse(status_code=400, content={"detail": str(exc)})
 
     app.add_exception_handler(BookAlreadyExistsError, conflict_handler)
+    app.add_exception_handler(BookNotFoundError, not_found_handler)
     app.add_exception_handler(IsbnValidationError, bad_request_handler)
     app.add_exception_handler(InvalidBookDataError, bad_request_handler)
     return app

@@ -50,6 +50,19 @@ class SqlAlchemyBookRepository(BookRepository):
             session.add(row)
             await session.commit()
 
+    async def update(self, book: Book) -> None:
+        """Update the stored row of the book with the same ISBN."""
+        async with self._sessions() as session:
+            row = await session.get(BookRow, book.isbn.digits)
+            if row is None:
+                raise ValueError(f"book {book.isbn.digits} does not exist")
+            row.title = book.title
+            row.author = book.author
+            row.genre = book.genre
+            row.description = book.description
+            row.available_stock = book.available_stock
+            await session.commit()
+
     async def count(self) -> int:
         """Return the total number of books in the catalog."""
         async with self._sessions() as session:

@@ -62,3 +62,7 @@ class LoanRepository(ABC):
     @abstractmethod
     async def list_by_user(self, user_id: str) -> list[Loan]:
         """Return every loan of the user, in any order."""
+
+    @abstractmethod
+    async def list_active(self) -> list[Loan]:
+        """Return every ACTIVE loan, across all users, in any order."""

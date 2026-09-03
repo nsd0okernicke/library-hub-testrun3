@@ -67,3 +67,11 @@ class SqlAlchemyLoanRepository(LoanRepository):
         async with self._sessions() as session:
             result = await session.execute(select(LoanRow).where(LoanRow.user_id == user_id))
             return [_to_domain(row) for row in result.scalars()]
+
+    async def list_active(self) -> list[Loan]:
+        """Return every ACTIVE loan, in storage order."""
+        async with self._sessions() as session:
+            result = await session.execute(
+                select(LoanRow).where(LoanRow.status == LoanStatus.ACTIVE.value)
+            )
+            return [_to_domain(row) for row in result.scalars()]

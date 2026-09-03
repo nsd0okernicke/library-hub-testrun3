@@ -83,6 +83,18 @@ class Loan:
         if self.requested_on is None:
             raise InvalidLoanDataError("requested_on must not be empty")
 
+    def is_overdue(self, today: date) -> bool:
+        """Whether the loan is overdue as of the given day.
+
+        A loan is overdue when it is ACTIVE and its due date lies strictly
+        before the given day. Loans in any other status are never overdue:
+        PENDING and REJECTED have no due date, and a RETURNED loan keeps its
+        due date but is no longer borrowed.
+        """
+        return (
+            self.status is LoanStatus.ACTIVE and self.due_date is not None and self.due_date < today
+        )
+
     def _require_pending(self) -> None:
         """Refuse settlement of a loan that has already been settled."""
         if self.status is not LoanStatus.PENDING:

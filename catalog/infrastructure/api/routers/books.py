@@ -6,11 +6,12 @@ from fastapi import APIRouter, Query, Request
 
 from catalog.application.check_book_availability import CheckBookAvailability
 from catalog.application.create_book import CreateBook, CreateBookCommand
+from catalog.application.increase_book_stock import IncreaseBookStock, IncreaseBookStockCommand
 from catalog.application.retrieve_book import RetrieveBook
 from catalog.application.search_books import SearchBooks
 from catalog.domain.book import Book
 from catalog.domain.search import SearchQuery
-from catalog.infrastructure.api.schemas import BookCreateRequest
+from catalog.infrastructure.api.schemas import BookCreateRequest, StockIncreaseRequest
 
 router = APIRouter()
 
@@ -41,6 +42,22 @@ async def create_book(payload: BookCreateRequest, request: Request) -> dict[str,
     use_case: CreateBook = request.app.state.create_book
     book = await use_case.execute(command)
     return _book_payload(book)
+
+
+@router.post("/books/{isbn}/stock")
+async def increase_book_stock(
+    isbn: str, payload: StockIncreaseRequest, request: Request
+) -> dict[str, object]:
+    """Manually add copies to the available stock of an existing book.
+
+    The ISBN is echoed in the format the client requested; the catalog keys
+    books by their 13-digit form, so hyphenation is display-only.
+    """
+    use_case: IncreaseBookStock = request.app.state.increase_book_stock
+    book = await use_case.execute(IncreaseBookStockCommand(isbn=isbn, copies=payload.copies))
+    response = _book_payload(book)
+    response["isbn"] = isbn
+    return response
 
 
 @router.get("/books/search")

@@ -1,0 +1,22 @@
+# Scoped mutation session for cat-6 (architect gate, 2026-09-03).
+#
+# Changed domain/application files this cycle:
+# - catalog/application/increase_book_stock.py  (mutated here)
+# - catalog/domain/exceptions.py                (new exception class only —
+#   class definition + docstring, no executable statements to mutate; the
+#   exception's behaviour is exercised via increase_book_stock.py)
+#
+# Run from the worktree root:
+#   .venv/Scripts/cosmic-ray init mutation-cat6.toml mutation-cat6.sqlite
+#   .venv/Scripts/cosmic-ray exec mutation-cat6.toml mutation-cat6.sqlite
+#   .venv/Scripts/cr-rate --fail-over 20 mutation-cat6.sqlite
+# Delete mutation-cat6.sqlite before re-running.
+
+[cosmic-ray]
+module-path = "catalog/application/increase_book_stock.py"
+timeout = 60.0
+excluded-modules = []
+test-command = "C:/projekte/agentic-coding/library-hub-testrun3/.venv/Scripts/python -m pytest tests/unit/catalog -x -q"
+
+[cosmic-ray.distributor]
+name = "local"

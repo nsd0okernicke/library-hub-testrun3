@@ -10,6 +10,7 @@ from typing import Any
 
 from pytest_bdd import given, scenarios, then, when
 from pytest_bdd.parsers import cfparse, parse
+from pytest_bdd.parsers import re as re_parser
 from sqlalchemy import update
 from starlette.testclient import TestClient
 
@@ -17,6 +18,7 @@ from catalog.domain.book import Book
 from catalog.domain.isbn import Isbn
 from catalog.infrastructure.db.models import BookRow
 from loans.domain.email import Email
+from loans.domain.events import BookReturned
 from loans.domain.loan import Loan, LoanStatus
 from loans.domain.ports import LoanRepository, UserRepository
 from loans.domain.user import User
@@ -45,10 +47,17 @@ _LOAN_3_FEATURE_PATH = os.path.normpath(
     )
 )
 
+_LOAN_4_FEATURE_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "features", "loan-4-return-book.feature"
+    )
+)
+
 scenarios(_FEATURE_PATH)
 scenarios(_LOAN_1_FEATURE_PATH)
 scenarios(_LOAN_2_FEATURE_PATH)
 scenarios(_LOAN_3_FEATURE_PATH)
+scenarios(_LOAN_4_FEATURE_PATH)
 
 _PROBLEMS_BY_EMAIL = {
     'the email is "plainaddress" without an @ sign': "plainaddress",
@@ -448,7 +457,12 @@ async def _create_loan_in_status(context: Any, isbn: str, status: str) -> None:
         await repository.save(loan)
 
 
-@given(cfparse('the user has a loan for the book with isbn "{isbn}" in status {status}'))
+@given(
+    re_parser(
+        r'the user has a loan for the book with isbn "(?P<isbn>[^"]+)" '
+        r"in status (?P<status>PENDING|ACTIVE|REJECTED|RETURNED)"
+    )
+)
 def user_has_loan_in_status(context: Any, isbn: str, status: str) -> None:
     """Give the user a loan for the isbn already in the named status."""
     asyncio.run(_create_loan_in_status(context, isbn, status))
@@ -654,3 +668,86 @@ def due_dates_follow_the_statuses(context: Any) -> None:
         else:
             assert item["status"] in ("PENDING", "REJECTED")
             assert item["due_date"] is None, item
+
+
+# ---------------------------------------------------------------------------
+# loan-4-return-book.feature: ACTIVE-only return with a BookReturned event
+# ---------------------------------------------------------------------------
+
+
+@given(
+    cfparse(
+        'the user has a loan for the book with isbn "{isbn}" '
+        "in status ACTIVE with a due date 10 days ago"
+    )
+)
+def user_has_overdue_active_loan(context: Any, isbn: str) -> None:
+    """Give the user an ACTIVE loan whose due date lies 10 days in the past."""
+    asyncio.run(_create_loan_in_status(context, isbn, "ACTIVE"))
+    repository: LoanRepository = context.loans.loan_repository
+
+    async def _push_due_date_into_the_past() -> None:
+        loan = await repository.get(context.loan_id)
+        assert loan is not None, f"loan {context.loan_id} not found"
+        loan.due_date = date.today() - timedelta(days=10)
+        await repository.save(loan)
+
+    asyncio.run(_push_due_date_into_the_past())
+
+
+@when("the loan is returned by its loan id")
+def loan_returned_by_its_id(context: Any) -> None:
+    """Send a return request for the loan created by the last given step."""
+    context.response = context.loans.client.post(f"/loans/{context.loan_id}/return")
+
+
+@when(cfparse('the loan with loan id "{loan_id}" is returned'))
+def loan_returned_by_given_id(context: Any, loan_id: str) -> None:
+    """Send a return request for the literally named loan id."""
+    context.response = context.loans.client.post(f"/loans/{loan_id}/return")
+
+
+def _book_returned_events(context: Any) -> list[BookReturned]:
+    """All BookReturned events the publisher has recorded so far."""
+    return [e for e in context.loans.publisher.events if isinstance(e, BookReturned)]
+
+
+@then(
+    cfparse(
+        "the system publishes a BookReturned event for the loan id, "
+        'the user id and the isbn "{isbn}"'
+    )
+)
+def book_returned_event_published(context: Any, isbn: str) -> None:
+    """Assert exactly one BookReturned event carrying the loan's identifying data."""
+    events = _book_returned_events(context)
+    assert len(events) == 1, events
+    event = events[0]
+    assert event.loan_id == context.loan_id
+    assert event.user_id == context.user_id
+    assert event.isbn.digits == Isbn(isbn).digits
+
+
+@then("no BookReturned event was published")
+def no_book_returned_event_published(context: Any) -> None:
+    """Assert the publisher recorded no BookReturned event at all."""
+    assert _book_returned_events(context) == []
+
+
+@then(cfparse("the loan is still in status {status}"))
+def loan_still_in_status(context: Any, status: str) -> None:
+    """Assert the refused return left the loan in the status it had before."""
+    loan = asyncio.run(context.loans.loan_repository.get(context.loan_id))
+    assert loan is not None, f"loan {context.loan_id} not found"
+    assert loan.status is LoanStatus(status), loan.status
+
+
+@then("the loan has no overdue flag, fee or penalty recorded")
+def return_records_no_penalty(context: Any) -> None:
+    """Assert the overdue return was closed like an on-time one: no penalty data."""
+    body = context.response.json()
+    assert not (set(body) & {"penalty", "fee", "overdue"}), body
+    loan = asyncio.run(context.loans.loan_repository.get(context.loan_id))
+    assert loan is not None
+    # The overdue due date is kept as-is: nothing about lateness is recorded.
+    assert loan.due_date == date.today() - timedelta(days=10)

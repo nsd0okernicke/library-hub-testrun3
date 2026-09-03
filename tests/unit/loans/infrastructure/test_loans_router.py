@@ -7,11 +7,12 @@ import pytest
 from starlette.testclient import TestClient
 
 from loans.domain.email import Email
+from loans.domain.events import BookReturned
 from loans.domain.isbn import Isbn
 from loans.domain.loan import Loan, LoanStatus
 from loans.domain.user import User
 from loans.infrastructure.api.main import create_app
-from tests.unit.loans.fakes import InMemoryLoans, InMemoryUsers
+from tests.unit.loans.fakes import InMemoryLoans, InMemoryPublisher, InMemoryUsers
 
 VALID_ISBN = "978-0-20-163361-0"
 
@@ -208,6 +209,102 @@ def test_settling_a_settled_loan_returns_409() -> None:
     assert client.post(f"/loans/{loan_id}/reservation/rejected").status_code == 200
 
     assert client.post(f"/loans/{loan_id}/reservation/fulfilled").status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# POST /loans/{loan_id}/return: ACTIVE-only return with a BookReturned event
+# ---------------------------------------------------------------------------
+
+
+def _active_loan_id(client: TestClient) -> str:
+    """Borrow and fulfill the default isbn, returning the ACTIVE loan id."""
+    loan_id = _borrow(client)
+    client.post(f"/loans/{loan_id}/reservation/fulfilled")
+    return loan_id
+
+
+def test_return_active_loan_closes_it_and_publishes_book_returned() -> None:
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_user(users)
+    client = make_client(users, loans)
+    publisher = InMemoryPublisher()
+    client = TestClient(create_app(users, loans, publisher))
+    loan_id = _active_loan_id(client)
+
+    response = client.post(f"/loans/{loan_id}/return")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["loan_id"] == loan_id
+    assert body["user_id"] == "user-1"
+    assert body["isbn"] == VALID_ISBN
+    assert body["status"] == "RETURNED"
+    assert body["due_date"] == (date.today() + timedelta(days=28)).isoformat()
+    assert publisher.events == [
+        BookReturned(loan_id=loan_id, user_id="user-1", isbn=Isbn(VALID_ISBN))
+    ]
+
+
+@pytest.mark.parametrize("setup", ["pending", "rejected", "returned"])
+def test_returning_a_non_active_loan_returns_409_and_publishes_nothing(setup: str) -> None:
+    """PENDING, REJECTED and RETURNED loans are refused with 409, status intact."""
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_user(users)
+    publisher = InMemoryPublisher()
+    client = TestClient(create_app(users, loans, publisher))
+    loan_id = _borrow(client)
+    expected_status = {
+        "pending": "PENDING",
+        "rejected": "REJECTED",
+        "returned": "RETURNED",
+    }[setup]
+    if setup == "rejected":
+        assert client.post(f"/loans/{loan_id}/reservation/rejected").status_code == 200
+    elif setup == "returned":
+        assert client.post(f"/loans/{loan_id}/reservation/fulfilled").status_code == 200
+
+        async def _mark_returned() -> None:
+            loan = await loans.get(loan_id)
+            assert loan is not None
+            loan.mark_returned()
+            await loans.save(loan)
+
+        asyncio.run(_mark_returned())
+
+    response = client.post(f"/loans/{loan_id}/return")
+
+    assert response.status_code == 409, response.text
+    assert client.get(f"/loans/{loan_id}").json()["status"] == expected_status
+    assert publisher.events == []
+
+
+def test_returning_an_unknown_loan_returns_404() -> None:
+    client = make_client(InMemoryUsers(), InMemoryLoans())
+
+    assert client.post("/loans/unknown-loan-id-1/return").status_code == 404
+
+
+def test_returning_after_the_due_date_closes_the_loan_without_penalty() -> None:
+    """An overdue return closes exactly like an on-time one: no extra fields."""
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_user(users)
+    client = make_client(users, loans)
+    loan_id = _active_loan_id(client)
+
+    async def _make_overdue() -> None:
+        loan = await loans.get(loan_id)
+        assert loan is not None
+        loan.due_date = date.today() - timedelta(days=10)
+        await loans.save(loan)
+
+    asyncio.run(_make_overdue())
+    response = client.post(f"/loans/{loan_id}/return")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "RETURNED"
+    assert body["due_date"] == (date.today() - timedelta(days=10)).isoformat()
+    assert not (set(body) & {"penalty", "fee", "overdue"}), body
 
 
 # ---------------------------------------------------------------------------

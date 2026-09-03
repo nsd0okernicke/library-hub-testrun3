@@ -5,6 +5,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Query, Request
 
 from loans.application.borrow_book import BorrowBook, BorrowBookCommand
+from loans.application.return_book import ReturnBook
 from loans.application.settle_reservation import FulfillReservation, RejectReservation
 from loans.application.view_user_loans import ViewUserLoans
 from loans.domain.loan import Loan, LoanNotFoundError
@@ -83,5 +84,18 @@ async def reservation_fulfilled(loan_id: str, request: Request) -> dict[str, obj
 async def reservation_rejected(loan_id: str, request: Request) -> dict[str, object]:
     """Apply a rejected reservation: the loan stays queryable in REJECTED."""
     use_case: RejectReservation = request.app.state.reject_reservation
+    loan = await use_case.execute(loan_id)
+    return _loan_payload(loan)
+
+
+@router.post("/loans/{loan_id}/return")
+async def return_book(loan_id: str, request: Request) -> dict[str, object]:
+    """Close the loan named by the loan id: ACTIVE loans become RETURNED.
+
+    The response echoes the loan with status RETURNED; the due date stays
+    on the loan and no overdue penalty is applied. A loan that is not
+    ACTIVE is a 409 Conflict; an unknown loan id is a 404 Not Found.
+    """
+    use_case: ReturnBook = request.app.state.return_book
     loan = await use_case.execute(loan_id)
     return _loan_payload(loan)

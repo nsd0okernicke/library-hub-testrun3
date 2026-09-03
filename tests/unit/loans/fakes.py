@@ -54,3 +54,7 @@ class InMemoryLoans(LoanRepository):
     async def count(self) -> int:
         """Return the total number of loans."""
         return len(self.loans)
+
+    async def list_by_user(self, user_id: str) -> list[Loan]:
+        """Return every loan of the user, in storage order."""
+        return [loan for loan in self.loans.values() if loan.user_id == user_id]

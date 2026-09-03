@@ -9,8 +9,10 @@ from __future__ import annotations
 
 from collections import namedtuple
 from collections.abc import Generator
+from typing import Any
 
 import pytest
+from pytest_bdd import then
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 from starlette.testclient import TestClient
@@ -19,8 +21,12 @@ from testcontainers.community.postgres import PostgresContainer
 from catalog.infrastructure.api.main import create_app
 from catalog.infrastructure.db.book_repository import SqlAlchemyBookRepository
 from catalog.infrastructure.db.models import Base
+from loans.infrastructure.api.main import create_app as create_loan_app
+from loans.infrastructure.db.models import Base as LoanBase
+from loans.infrastructure.db.user_repository import SqlAlchemyUserRepository
 
 Catalog = namedtuple("Catalog", ["client", "repository"])
+Loans = namedtuple("Loans", ["client", "repository"])
 
 
 class StepContext:
@@ -33,9 +39,38 @@ def context() -> StepContext:
     return StepContext()
 
 
+# Generic HTTP status steps shared by all service step modules.
+# pytest-bdd registers steps per module, so cross-service steps live here.
+
+
+@then("the request succeeds with a 201 Created")
+def request_succeeded(context: Any) -> None:
+    """Assert the last request returned 201 Created."""
+    assert context.response.status_code == 201, context.response.text
+
+
+@then("the request is rejected with a 409 Conflict")
+def request_conflict(context: Any) -> None:
+    """Assert the last request returned 409 Conflict."""
+    assert context.response.status_code == 409, context.response.text
+
+
+@then("the request is rejected with a 400 Bad Request")
+def request_bad_request(context: Any) -> None:
+    """Assert the last request returned 400 Bad Request."""
+    assert context.response.status_code == 400, context.response.text
+
+
 @pytest.fixture(scope="session")
 def postgres_container() -> Generator[PostgresContainer, None, None]:
     """Session-scoped PostgreSQL container shared by all scenarios."""
+    with PostgresContainer("postgres:16-alpine") as container:
+        yield container
+
+
+@pytest.fixture(scope="session")
+def loans_postgres_container() -> Generator[PostgresContainer, None, None]:
+    """Session-scoped PostgreSQL container for the loan service scenarios."""
     with PostgresContainer("postgres:16-alpine") as container:
         yield container
 
@@ -58,4 +93,25 @@ async def catalog(postgres_container: PostgresContainer) -> Generator[Catalog, N
     app = create_app(repository)
     with TestClient(app) as client:
         yield Catalog(client=client, repository=repository)
+    await engine.dispose()
+
+
+@pytest.fixture()
+async def loans(loans_postgres_container: PostgresContainer) -> Generator[Loans, None, None]:
+    """Function-scoped loan app with a freshly created, empty users table."""
+    host = loans_postgres_container.get_container_host_ip()
+    port = loans_postgres_container.get_exposed_port(5432)
+    url = (
+        f"postgresql+asyncpg://{loans_postgres_container.username}:"
+        f"{loans_postgres_container.password}@{host}:{port}/{loans_postgres_container.dbname}"
+    )
+    engine = create_async_engine(url, poolclass=NullPool)
+    async with engine.begin() as conn:
+        await conn.run_sync(LoanBase.metadata.create_all)
+        await conn.execute(LoanBase.metadata.tables["users"].delete())
+
+    repository = SqlAlchemyUserRepository(async_sessionmaker(engine, expire_on_commit=False))
+    app = create_loan_app(repository)
+    with TestClient(app) as client:
+        yield Loans(client=client, repository=repository)
     await engine.dispose()

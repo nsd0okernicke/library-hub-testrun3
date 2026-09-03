@@ -20,7 +20,19 @@ _FEATURE_PATH = os.path.normpath(
     )
 )
 
+_FEATURE_RETRIEVE_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "..",
+        "features",
+        "cat-5-retrieve-book-by-isbn.feature",
+    )
+)
+
 scenarios(_FEATURE_PATH)
+scenarios(_FEATURE_RETRIEVE_PATH)
 
 
 def _post_book(context: Any, payload: dict[str, object]) -> None:
@@ -172,7 +184,16 @@ def book_fields_match(context: Any, title: str, author: str, genre: str) -> None
 
 @then(cfparse("its available stock is {initial_stock:d}"))
 def book_stock_matches(context: Any, initial_stock: int) -> None:
-    """Assert the stored available stock matches the request."""
+    """Assert the available stock matches the request.
+
+    When the last request was a successful retrieval (200), the stock is
+    asserted from the response body; for create-book requests (201) it is
+    asserted against the stored book.
+    """
+    response = getattr(context, "response", None)
+    if response is not None and response.status_code == 200:
+        assert response.json()["available_stock"] == initial_stock, response.text
+        return
     assert _requested_book(context).available_stock == initial_stock
 
 
@@ -203,6 +224,105 @@ def exactly_one_book_with_isbn(context: Any, isbn: str) -> None:
 def request_bad_request(context: Any) -> None:
     """Assert the create-book request returned 400 Bad Request."""
     assert context.response.status_code == 400, context.response.text
+
+
+@given(
+    cfparse(
+        'a book with isbn "{isbn}", title "{title}", author "{author}", genre "'
+        '{genre}", description "{description}" and initial stock {stock:d}'
+    )
+)
+def book_with_description_seeded(
+    context: Any, isbn: str, title: str, author: str, genre: str, description: str, stock: int
+) -> None:
+    """Seed the catalog with a fully described book ready to be retrieved."""
+    asyncio.run(
+        context.catalog.repository.save(
+            Book(
+                isbn=Isbn(isbn),
+                title=title,
+                author=author,
+                genre=genre,
+                available_stock=stock,
+                description=description,
+            )
+        )
+    )
+
+
+@given(
+    cfparse(
+        'a book with isbn "{isbn}", title "{title}", author "{author}", genre "'
+        '{genre}" and initial stock {stock:d}'
+    )
+)
+def book_without_description_seeded(
+    context: Any, isbn: str, title: str, author: str, genre: str, stock: int
+) -> None:
+    """Seed the catalog with a book created without a description."""
+    asyncio.run(
+        context.catalog.repository.save(
+            Book(
+                isbn=Isbn(isbn),
+                title=title,
+                author=author,
+                genre=genre,
+                available_stock=stock,
+            )
+        )
+    )
+
+
+@when(cfparse('the book with isbn "{isbn}" is requested'))
+def retrieve_book_requested(context: Any, isbn: str) -> None:
+    """Send a GET /books/{isbn} request for the given ISBN."""
+    client: TestClient = context.catalog.client
+    context.response = client.get(f"/books/{isbn}")
+
+
+@then("the request succeeds with a 200 OK")
+def retrieve_succeeded(context: Any) -> None:
+    """Assert the retrieve request returned 200 OK."""
+    assert context.response.status_code == 200, context.response.text
+
+
+@then(
+    cfparse(
+        'the response contains isbn "{isbn}", title "{title}", author "'
+        '{author}", genre "{genre}" and description "{description}"'
+    )
+)
+def retrieve_response_contains_full_metadata(
+    context: Any, isbn: str, title: str, author: str, genre: str, description: str
+) -> None:
+    """Assert the response carries the stored metadata unchanged."""
+    body = context.response.json()
+    assert body["isbn"] == isbn
+    assert body["title"] == title
+    assert body["author"] == author
+    assert body["genre"] == genre
+    assert body["description"] == description
+
+
+@then(cfparse('the response contains title "{title}", author "{author}" and genre "{genre}"'))
+def retrieve_response_contains_metadata(context: Any, title: str, author: str, genre: str) -> None:
+    """Assert the response carries the stored title, author and genre."""
+    body = context.response.json()
+    assert body["title"] == title
+    assert body["author"] == author
+    assert body["genre"] == genre
+
+
+@then("its description is empty")
+def retrieve_response_description_empty(context: Any) -> None:
+    """Assert the response description of a description-less book is empty."""
+    assert context.response.json()["description"] == ""
+
+
+@then("the request is rejected with a 404 Not Found")
+def retrieve_rejected_not_found(context: Any) -> None:
+    """Assert the retrieve request for a missing book returned 404."""
+    assert context.response.status_code == 404, context.response.text
 
 
 @then("no book was added to the catalog")

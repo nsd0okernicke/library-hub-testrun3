@@ -18,3 +18,13 @@ class BookCreateRequest(BaseModel):
     genre: str = ""
     initial_stock: int = 0
     description: str | None = None
+
+
+class StockIncreaseRequest(BaseModel):
+    """Payload for POST /books/{isbn}/stock.
+
+    ``copies`` defaults to zero so that a missing count surfaces as a 400
+    from the domain layer rather than a 422 from the HTTP layer.
+    """
+
+    copies: int = 0

@@ -23,3 +23,7 @@ class BookNotFoundError(Exception):
 
 class InvalidSearchParametersError(ValueError):
     """Raised when a catalog search names an invalid page or page size."""
+
+
+class InvalidCopiesError(ValueError):
+    """Raised when a stock adjustment names a non-positive number of copies."""

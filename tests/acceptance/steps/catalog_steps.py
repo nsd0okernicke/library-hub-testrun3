@@ -56,11 +56,18 @@ _FEATURE_RETURNED_PATH = os.path.normpath(
     )
 )
 
+_FEATURE_STOCK_RETURN_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "features", "cat-6-manual-stock-return.feature"
+    )
+)
+
 scenarios(_FEATURE_PATH)
 scenarios(_FEATURE_RETRIEVE_PATH)
 scenarios(_FEATURE_SEARCH_PATH)
 scenarios(_FEATURE_AVAILABILITY_PATH)
 scenarios(_FEATURE_RETURNED_PATH)
+scenarios(_FEATURE_STOCK_RETURN_PATH)
 
 
 def _post_book(context: Any, payload: dict[str, object]) -> None:
@@ -519,3 +526,24 @@ def catalog_contains_no_book_with_isbn(context: Any, isbn: str) -> None:
     except IsbnValidationError:
         return
     assert asyncio.run(context.catalog.repository.get_by_isbn(isbn_value)) is None
+
+
+# ---------------------------------------------------------------------------
+# cat-6-manual-stock-return.feature: manual stock increase
+# ---------------------------------------------------------------------------
+
+
+@given(cfparse('no loan for isbn "{isbn}" exists'))
+def no_loan_for_isbn_exists(context: Any, isbn: str) -> None:
+    """Record the loan-free precondition; the catalog app does not depend on loans."""
+    context.loan_free_isbns = getattr(context, "loan_free_isbns", []) + [isbn]
+
+
+@when(cfparse('{copies:d} copies are added to the stock of the book with isbn "{isbn}"'))
+def copies_added_to_stock(context: Any, copies: int, isbn: str) -> None:
+    """Send a manual stock-increase request for the given ISBN."""
+    context.requested_isbn = isbn
+    repository: BookRepository = context.catalog.repository
+    context.catalog_count_before = asyncio.run(repository.count())
+    client: TestClient = context.catalog.client
+    context.response = client.post(f"/books/{isbn}/stock", json={"copies": copies})

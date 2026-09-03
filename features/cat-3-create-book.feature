@@ -44,20 +44,22 @@ Feature: Create a new book in the catalog
 
   Scenarios:
     | isbn              |
-    | 978-0-20-163361-0 | # pre-seeded book (Dune)       |
-    | 978-0-13-468599-1 | # pre-seeded book (Refactoring) |
+    | 978-0-20-163361-0 |
+    | 978-0-13-468599-1 |
 
   Scenario: A book request with an invalid isbn format is rejected
     When a book is requested with isbn "<isbn>", title "Test Book", author "Test Author", genre "Fiction" and initial stock 1
     Then the request is rejected with a 400 Bad Request
     And no book was added to the catalog
 
+  # Row notes: 978-0-14-103614 has 12 digits; 978-0-14-103614-34 has 14 digits;
+  # 978-0-14-103614-X contains a letter; 0-14-103614-3 is an ISBN-10 length.
   Scenarios:
     | isbn             |
-    | 978-0-14-103614   | # 12 digits          |
-    | 978-0-14-103614-34 | # 14 digits         |
-    | 978-0-14-103614-X | # letter, not digit  |
-    | 0-14-103614-3     | # ISBN-10 length     |
+    | 978-0-14-103614   |
+    | 978-0-14-103614-34 |
+    | 978-0-14-103614-X |
+    | 0-14-103614-3     |
 
   Scenario: A book request with invalid required data is rejected
     When a book is requested where <problem>

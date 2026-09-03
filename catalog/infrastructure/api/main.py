@@ -9,6 +9,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
 
+from catalog.application.check_book_availability import CheckBookAvailability
 from catalog.application.create_book import CreateBook
 from catalog.application.retrieve_book import RetrieveBook
 from catalog.application.search_books import SearchBooks
@@ -31,6 +32,7 @@ def create_app(books: BookRepository) -> FastAPI:
     """Build the catalog FastAPI app wired to the given repository port."""
     app = FastAPI(title="Catalog Service")
     app.state.create_book = CreateBook(books)
+    app.state.check_book_availability = CheckBookAvailability(books)
     app.state.retrieve_book = RetrieveBook(books)
     app.state.search_books = SearchBooks(books)
     app.include_router(books_router)

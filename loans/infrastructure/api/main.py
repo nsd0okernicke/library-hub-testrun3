@@ -11,6 +11,7 @@ from sqlalchemy.pool import NullPool
 
 from loans.application.borrow_book import BorrowBook
 from loans.application.create_user import CreateUser
+from loans.application.return_book import ReturnBook
 from loans.application.settle_reservation import FulfillReservation, RejectReservation
 from loans.application.view_user_loans import ViewUserLoans
 from loans.domain.email import EmailValidationError
@@ -20,32 +21,44 @@ from loans.domain.exceptions import (
     UserAlreadyExistsError,
 )
 from loans.domain.isbn import IsbnValidationError
-from loans.domain.loan import InvalidLoanDataError, LoanNotFoundError, LoanNotPendingError
-from loans.domain.ports import LoanRepository, UserRepository
+from loans.domain.loan import (
+    InvalidLoanDataError,
+    LoanNotActiveError,
+    LoanNotFoundError,
+    LoanNotPendingError,
+)
+from loans.domain.ports import DomainEventPublisher, LoanRepository, UserRepository
 from loans.domain.user import InvalidUserDataError
 from loans.infrastructure.api.routers.loans import router as loans_router
 from loans.infrastructure.api.routers.users import router as users_router
 from loans.infrastructure.db.loan_repository import SqlAlchemyLoanRepository
 from loans.infrastructure.db.models import Base
 from loans.infrastructure.db.user_repository import SqlAlchemyUserRepository
+from loans.infrastructure.events import InMemoryEventPublisher
 
 _DEFAULT_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@localhost:5432/loan_db"
 
 
-def create_app(users: UserRepository, loans: LoanRepository) -> FastAPI:
-    """Build the loan service FastAPI app wired to the given repository ports."""
+def create_app(
+    users: UserRepository,
+    loans: LoanRepository,
+    publisher: DomainEventPublisher | None = None,
+) -> FastAPI:
+    """Build the loan service FastAPI app wired to the given ports."""
     app = FastAPI(title="Loan Service")
+    app.state.publisher = publisher or InMemoryEventPublisher()
     app.state.create_user = CreateUser(users)
     app.state.borrow_book = BorrowBook(users, loans)
     app.state.fulfill_reservation = FulfillReservation(loans)
     app.state.reject_reservation = RejectReservation(loans)
     app.state.view_user_loans = ViewUserLoans(users, loans)
+    app.state.return_book = ReturnBook(loans, app.state.publisher)
     app.state.loan_repository = loans
     app.include_router(users_router)
     app.include_router(loans_router)
 
     async def conflict_handler(request: Request, exc: Exception) -> JSONResponse:
-        """Map a duplicate-email conflict or settled loan to 409."""
+        """Map a duplicate email, a settled loan or a non-ACTIVE return to 409."""
         return JSONResponse(status_code=409, content={"detail": str(exc)})
 
     async def not_found_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -58,6 +71,7 @@ def create_app(users: UserRepository, loans: LoanRepository) -> FastAPI:
 
     app.add_exception_handler(UserAlreadyExistsError, conflict_handler)
     app.add_exception_handler(LoanNotPendingError, conflict_handler)
+    app.add_exception_handler(LoanNotActiveError, conflict_handler)
     app.add_exception_handler(UnknownUserError, not_found_handler)
     app.add_exception_handler(LoanNotFoundError, not_found_handler)
     app.add_exception_handler(EmailValidationError, bad_request_handler)

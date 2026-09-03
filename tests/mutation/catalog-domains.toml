@@ -16,16 +16,16 @@
 #   by tests/unit/catalog/domain/test_ports.py instead.
 #
 # Run from the worktree root:
-#   <project_root>/.venv/Scripts/cosmic-ray init mutation-catalog.toml mutation-catalog.sqlite
-#   <project_root>/.venv/Scripts/cosmic-ray exec mutation-catalog.toml mutation-catalog.sqlite
-#   <project_root>/.venv/Scripts/cr-rate --fail-over 20 mutation-catalog.sqlite
-# Delete mutation-catalog.sqlite (and any mutant working copies) before re-running.
+#   uv run cosmic-ray init tests/mutation/catalog-domains.toml .kiln-mutation/catalog.sqlite
+#   uv run cosmic-ray exec tests/mutation/catalog-domains.toml .kiln-mutation/catalog.sqlite
+#   uv run cr-rate --fail-over 20 .kiln-mutation/catalog.sqlite
+# Delete .kiln-mutation/catalog.sqlite (and any mutant working copies) before re-running.
 
 [cosmic-ray]
 module-path = "catalog"
 timeout = 60.0
 excluded-modules = ["catalog/infrastructure/**/*.py", "catalog/domain/ports.py"]
-test-command = "C:/projekte/agentic-coding/library-hub-testrun3/.venv/Scripts/python -m pytest tests/unit -x -q"
+test-command = "python -m pytest tests/unit -x -q"
 
 [cosmic-ray.distributor]
 name = "local"

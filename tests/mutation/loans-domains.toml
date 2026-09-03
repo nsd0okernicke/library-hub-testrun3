@@ -16,16 +16,16 @@
 #   unit/acceptance suites instead.
 #
 # Run from the worktree root:
-#   <project_root>/.venv/Scripts/cosmic-ray init mutation-loans.toml mutation-loans.sqlite
-#   <project_root>/.venv/Scripts/cosmic-ray exec mutation-loans.toml mutation-loans.sqlite
-#   <project_root>/.venv/Scripts/cr-rate --fail-over 20 mutation-loans.sqlite
-# Delete mutation-loans.sqlite (and any mutant working copies) before re-running.
+#   uv run cosmic-ray init tests/mutation/loans-domains.toml .kiln-mutation/loans.sqlite
+#   uv run cosmic-ray exec tests/mutation/loans-domains.toml .kiln-mutation/loans.sqlite
+#   uv run cr-rate --fail-over 20 .kiln-mutation/loans.sqlite
+# Delete .kiln-mutation/loans.sqlite (and any mutant working copies) before re-running.
 
 [cosmic-ray]
 module-path = "loans"
 timeout = 60.0
 excluded-modules = ["loans/infrastructure/**/*.py", "loans/domain/ports.py"]
-test-command = "C:/projekte/agentic-coding/library-hub-testrun3/.venv/Scripts/python -m pytest tests/unit -x -q"
+test-command = "python -m pytest tests/unit -x -q"
 
 [cosmic-ray.distributor]
 name = "local"

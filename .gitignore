@@ -36,3 +36,7 @@ tmp/
 reports/
 
 !.github/workflows/
+
+# cosmic-ray mutation sessions (see tests/mutation/)
+.kiln-mutation/
+*.sqlite

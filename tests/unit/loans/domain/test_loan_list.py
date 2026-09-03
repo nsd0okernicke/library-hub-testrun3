@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import dataclasses
+
 import pytest
 
 from loans.domain.exceptions import InvalidLoanListParametersError
@@ -62,6 +64,14 @@ def test_query_rejects_an_empty_user_id() -> None:
     """An empty user id names no user and is invalid list data."""
     with pytest.raises(InvalidLoanListParametersError):
         LoanListQuery(user_id="")
+
+
+def test_query_is_immutable() -> None:
+    """LoanListQuery is a frozen value object; its fields cannot be reassigned."""
+    query = LoanListQuery(user_id="user-1")
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        query.page = 2  # type: ignore[misc]
 
 
 def test_result_defaults_to_an_empty_page() -> None:

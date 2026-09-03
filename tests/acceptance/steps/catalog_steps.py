@@ -39,9 +39,21 @@ _FEATURE_SEARCH_PATH = os.path.normpath(
     )
 )
 
+_FEATURE_AVAILABILITY_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(__file__),
+        "..",
+        "..",
+        "..",
+        "features",
+        "cat-2-check-book-availability.feature",
+    )
+)
+
 scenarios(_FEATURE_PATH)
 scenarios(_FEATURE_RETRIEVE_PATH)
 scenarios(_FEATURE_SEARCH_PATH)
+scenarios(_FEATURE_AVAILABILITY_PATH)
 
 
 def _post_book(context: Any, payload: dict[str, object]) -> None:
@@ -314,6 +326,32 @@ def retrieve_response_description_empty(context: Any) -> None:
 def retrieve_rejected_not_found(context: Any) -> None:
     """Assert the retrieve request for a missing book returned 404."""
     assert context.response.status_code == 404, context.response.text
+
+
+# ---------------------------------------------------------------------------
+# cat-2-check-book-availability.feature: availability by ISBN
+# ---------------------------------------------------------------------------
+
+
+@when(cfparse('the availability of the book with isbn "{isbn}" is requested'))
+def availability_requested(context: Any, isbn: str) -> None:
+    """Send a GET /books/{isbn}/availability request for the given ISBN."""
+    client: TestClient = context.catalog.client
+    context.response = client.get(f"/books/{isbn}/availability")
+
+
+@then(cfparse('the response contains only isbn "{isbn}" and available stock {stock:d}'))
+def availability_response_contains_isbn_and_stock(context: Any, isbn: str, stock: int) -> None:
+    """Assert the response carries the ISBN and the current available stock."""
+    body = context.response.json()
+    assert body["isbn"] == isbn, context.response.text
+    assert body["available_count"] == stock, context.response.text
+
+
+@then("the response contains no title, author, genre or description")
+def availability_response_has_no_metadata(context: Any) -> None:
+    """Assert the availability response exposes no other book metadata."""
+    assert set(context.response.json()) == {"isbn", "available_count"}, context.response.text
 
 
 @then("no book was added to the catalog")

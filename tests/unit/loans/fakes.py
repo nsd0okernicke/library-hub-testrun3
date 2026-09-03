@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from loans.domain.email import Email
 from loans.domain.events import DomainEvent
-from loans.domain.loan import Loan
+from loans.domain.loan import Loan, LoanStatus
 from loans.domain.ports import DomainEventPublisher, LoanRepository, UserRepository
 from loans.domain.user import User
 
@@ -59,6 +59,10 @@ class InMemoryLoans(LoanRepository):
     async def list_by_user(self, user_id: str) -> list[Loan]:
         """Return every loan of the user, in storage order."""
         return [loan for loan in self.loans.values() if loan.user_id == user_id]
+
+    async def list_active(self) -> list[Loan]:
+        """Return every ACTIVE loan, in storage order."""
+        return [loan for loan in self.loans.values() if loan.status is LoanStatus.ACTIVE]
 
 
 class InMemoryPublisher(DomainEventPublisher):

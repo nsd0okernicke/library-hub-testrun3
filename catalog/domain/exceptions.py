@@ -19,3 +19,7 @@ class BookNotFoundError(Exception):
         """Create the error, remembering the missing ISBN."""
         super().__init__(f"book with ISBN {isbn} not found")
         self.isbn = isbn
+
+
+class InvalidSearchParametersError(ValueError):
+    """Raised when a catalog search names an invalid page or page size."""

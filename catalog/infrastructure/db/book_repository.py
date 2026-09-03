@@ -55,3 +55,9 @@ class SqlAlchemyBookRepository(BookRepository):
         async with self._sessions() as session:
             result = await session.scalar(select(func.count()).select_from(BookRow))
             return int(result or 0)
+
+    async def list_all(self) -> list[Book]:
+        """Return every book currently in the catalog."""
+        async with self._sessions() as session:
+            result = await session.scalars(select(BookRow))
+            return [_to_domain(row) for row in result.all()]

@@ -10,3 +10,12 @@ class UserAlreadyExistsError(Exception):
         """Create the error, remembering the offending email."""
         super().__init__(f"user with email {email} already exists")
         self.email = email
+
+
+class UnknownUserError(Exception):
+    """Raised when a borrow request names a user id that does not exist."""
+
+    def __init__(self, user_id: str) -> None:
+        """Create the error, remembering the offending user id."""
+        super().__init__(f"user with id {user_id} does not exist")
+        self.user_id = user_id

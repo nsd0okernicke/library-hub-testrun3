@@ -18,19 +18,30 @@ class InvalidLoanDataError(ValueError):
 
 
 class LoanStatus(enum.Enum):
-    """Lifecycle of a loan: requested, then either active or rejected."""
+    """Lifecycle of a loan: requested, then active or rejected, and returned."""
 
     PENDING = "PENDING"
     ACTIVE = "ACTIVE"
     REJECTED = "REJECTED"
+    RETURNED = "RETURNED"
 
 
 class LoanNotPendingError(Exception):
-    """Raised when settling a loan that is already ACTIVE or REJECTED."""
+    """Raised when settling a loan that is no longer PENDING."""
 
     def __init__(self, loan_id: str, status: LoanStatus) -> None:
         """Create the error, remembering the loan and its status."""
         super().__init__(f"loan {loan_id} is {status.value}, not PENDING")
+        self.loan_id = loan_id
+        self.status = status
+
+
+class LoanNotActiveError(Exception):
+    """Raised when returning a loan that is not ACTIVE."""
+
+    def __init__(self, loan_id: str, status: LoanStatus) -> None:
+        """Create the error, remembering the loan and its status."""
+        super().__init__(f"loan {loan_id} is {status.value}, not ACTIVE")
         self.loan_id = loan_id
         self.status = status
 
@@ -51,7 +62,8 @@ class Loan:
     The loan is created in status PENDING when the borrow request is accepted.
     Filling the reservation activates it with a due date of the request date
     plus the global loan term; rejecting it leaves it queryable in status
-    REJECTED with no due date.
+    REJECTED with no due date. An ACTIVE loan may be returned; the due date
+    stays on the loan in status RETURNED, which is also queryable.
     """
 
     loan_id: str
@@ -75,6 +87,16 @@ class Loan:
         """Refuse settlement of a loan that has already been settled."""
         if self.status is not LoanStatus.PENDING:
             raise LoanNotPendingError(self.loan_id, self.status)
+
+    def _require_active(self) -> None:
+        """Refuse returning a loan that has not been fulfilled."""
+        if self.status is not LoanStatus.ACTIVE:
+            raise LoanNotActiveError(self.loan_id, self.status)
+
+    def mark_returned(self) -> None:
+        """Mark an ACTIVE loan as returned, keeping its due date."""
+        self._require_active()
+        self.status = LoanStatus.RETURNED
 
     def fulfill(self) -> None:
         """Mark the reservation as fulfilled: ACTIVE with a due date.

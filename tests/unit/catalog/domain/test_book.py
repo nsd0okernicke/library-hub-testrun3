@@ -55,3 +55,7 @@ def test_none_description_stored_as_empty_string() -> None:
 def test_invalid_book_data_error_is_value_error() -> None:
     with pytest.raises(ValueError):
         make_book(title="")
+
+
+def test_book_uses_slots() -> None:
+    assert not hasattr(make_book(), "__dict__")

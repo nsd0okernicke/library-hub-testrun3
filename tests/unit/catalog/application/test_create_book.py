@@ -1,5 +1,7 @@
 """Unit tests for the CreateBook use case with a fake repository port."""
 
+import dataclasses
+
 import pytest
 
 from catalog.application.create_book import CreateBook, CreateBookCommand
@@ -85,3 +87,9 @@ async def test_negative_stock_rejected() -> None:
     with pytest.raises(InvalidBookDataError):
         await CreateBook(repo).execute(command(initial_stock=-1))
     assert await repo.count() == 0
+
+
+def test_command_is_immutable() -> None:
+    cmd = command()
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        cmd.title = "Tampered"

@@ -27,6 +27,8 @@ dev = [
     "interrogate>=1.5",
     "pip-audit>=2.7",
     "radon>=6.0",
+    "bandit>=1.7",
+    "import-linter>=2.0",
 ]
 
 [build-system]
@@ -52,3 +54,13 @@ target-version = "py310"
 
 [tool.ruff.lint]
 select = ["E", "F", "W", "I", "UP", "B"]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+skips = ["B101"]
+
+[tool.importlinter]
+root_packages = ["catalog"]
+contracts = [
+    { name = "Catalog dependency direction: infrastructure -> application -> domain", type = "layers", layers = ["catalog.infrastructure", "catalog.application", "catalog.domain"] },
+]

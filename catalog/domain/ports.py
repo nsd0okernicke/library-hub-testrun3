@@ -24,6 +24,10 @@ class BookRepository(ABC):
         """Insert a new book into the catalog."""
 
     @abstractmethod
+    async def update(self, book: Book) -> None:
+        """Replace the stored book with the same ISBN with the given state."""
+
+    @abstractmethod
     async def count(self) -> int:
         """Return the total number of books in the catalog."""
 

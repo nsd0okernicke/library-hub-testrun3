@@ -26,6 +26,10 @@ class InMemoryBooks(BookRepository):
         """Insert a book into the in-memory catalog."""
         self.books[book.isbn.digits] = book
 
+    async def update(self, book: Book) -> None:
+        """Replace the in-memory book with the same ISBN."""
+        self.books[book.isbn.digits] = book
+
     async def count(self) -> int:
         """Return the total number of books in the catalog."""
         return len(self.books)

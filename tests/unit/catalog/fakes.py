@@ -29,3 +29,7 @@ class InMemoryBooks(BookRepository):
     async def count(self) -> int:
         """Return the total number of books in the catalog."""
         return len(self.books)
+
+    async def list_all(self) -> list[Book]:
+        """Return every book currently in the catalog."""
+        return list(self.books.values())

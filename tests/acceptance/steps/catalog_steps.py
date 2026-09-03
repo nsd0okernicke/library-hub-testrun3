@@ -4,10 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from typing import Any
 
 from pytest_bdd import given, scenarios, then, when
 from pytest_bdd.parsers import cfparse
+from pytest_bdd.parsers import re as re_parser
 from starlette.testclient import TestClient
 
 from catalog.domain.book import Book
@@ -31,8 +33,15 @@ _FEATURE_RETRIEVE_PATH = os.path.normpath(
     )
 )
 
+_FEATURE_SEARCH_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "features", "cat-1-search-books.feature"
+    )
+)
+
 scenarios(_FEATURE_PATH)
 scenarios(_FEATURE_RETRIEVE_PATH)
+scenarios(_FEATURE_SEARCH_PATH)
 
 
 def _post_book(context: Any, payload: dict[str, object]) -> None:
@@ -312,3 +321,106 @@ def no_book_added(context: Any) -> None:
     """Assert the rejected request left the catalog size unchanged."""
     after = asyncio.run(context.catalog.repository.count())
     assert after == context.catalog_count_before
+
+
+# ---------------------------------------------------------------------------
+# cat-1-search-books.feature: search by title/author/genre with pagination
+# ---------------------------------------------------------------------------
+
+
+def _search(context: Any, **params: object) -> None:
+    """Send GET /books/search with the given query parameters."""
+    client: TestClient = context.catalog.client
+    context.response = client.get("/books/search", params=params)
+
+
+def _result_titles(context: Any) -> list[str]:
+    """Extract the result titles from the last search response, in order."""
+    return [item["title"] for item in context.response.json()["items"]]
+
+
+def _expected_titles(raw: str) -> list[str]:
+    """Parse a Gherkin titles list like '"Dune", "Refactoring" and "The Hobbit"'."""
+    return re.findall(r'"([^"]*)"', raw)
+
+
+def _assert_titles_exact(context: Any, titles: str) -> None:
+    """Assert the result list contains exactly the named titles, in order."""
+    expected = _expected_titles(titles)
+    assert _result_titles(context) == expected, context.response.text
+
+
+@given("the catalog is pre-seeded with:", target_fixture="seeded_books")
+def catalog_pre_seeded(context: Any, catalog: Any, datatable: Any) -> None:
+    """Pre-seed the catalog with the books from the step's table."""
+    rows: list[list[str]] = []
+    for row in list(datatable)[1:]:  # first row is the table header
+        isbn, title, author, genre = (str(cell) for cell in row)
+        book = Book(isbn=Isbn(isbn), title=title, author=author, genre=genre, available_stock=1)
+        asyncio.run(catalog.repository.save(book))
+        rows.append([isbn, title, author, genre])
+    return rows
+
+
+@when("the catalog is searched")
+def search_without_filters(context: Any) -> None:
+    """Send an unfiltered search request."""
+    _search(context)
+
+
+@when(cfparse('the catalog is searched with title "{title}" and author "{author}"'))
+def search_with_title_and_author(context: Any, title: str, author: str) -> None:
+    """Send a search combining a title and an author filter."""
+    _search(context, title=title, author=author)
+
+
+@when(re_parser(r'the catalog is searched with (?P<field>\w+) "(?P<text>[^"]+)"'))
+def search_with_single_filter(context: Any, field: str, text: str) -> None:
+    """Send a search filtered on exactly the named field."""
+    assert field in ("title", "author", "genre"), field
+    _search(context, **{field: text})
+
+
+@when(cfparse("the catalog is searched with page {page:d} and page size {page_size:d}"))
+def search_with_pagination(context: Any, page: int, page_size: int) -> None:
+    """Send a search for the named page and page size."""
+    _search(context, page=page, page_size=page_size)
+
+
+@when(re_parser(r"the catalog is searched where the (?P<which>page(?: size)?) is (?P<value>-?\d+)"))
+def search_with_invalid_pagination(context: Any, which: str, value: str) -> None:
+    """Send a search whose named page or page size is out of range."""
+    param = "page_size" if which == "page size" else "page"
+    _search(context, **{param: int(value)})
+
+
+@then(re_parser(r"the result list contains exactly (?P<titles>.+) in this order"))
+def result_list_exact_in_order(context: Any, titles: str) -> None:
+    """Assert the result list contains exactly the named titles, in order."""
+    _assert_titles_exact(context, titles)
+
+
+@then(re_parser(r"the result list contains exactly (?P<titles>.+)"))
+def result_list_exact(context: Any, titles: str) -> None:
+    """Assert the result list contains exactly the named titles."""
+    _assert_titles_exact(context, titles)
+
+
+@then("the result list is empty")
+def result_list_empty(context: Any) -> None:
+    """Assert the search returned no books."""
+    assert context.response.json()["items"] == [], context.response.text
+
+
+@then(cfparse("the total count is {total:d}"))
+def total_count_is(context: Any, total: int) -> None:
+    """Assert the response reports the expected total match count."""
+    assert context.response.json()["total"] == total, context.response.text
+
+
+@then(cfparse("the response reports page {page:d} and page size {page_size:d}"))
+def response_reports_pagination(context: Any, page: int, page_size: int) -> None:
+    """Assert the response echoes the page and page size applied."""
+    body = context.response.json()
+    assert body["page"] == page, context.response.text
+    assert body["page_size"] == page_size, context.response.text

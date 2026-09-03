@@ -5,8 +5,17 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from loans.domain.email import Email
+from loans.domain.events import DomainEvent
 from loans.domain.loan import Loan
 from loans.domain.user import User
+
+
+class DomainEventPublisher(ABC):
+    """Outbound port for publishing domain events."""
+
+    @abstractmethod
+    async def publish(self, event: DomainEvent) -> None:
+        """Publish a domain event to interested consumers."""
 
 
 class UserRepository(ABC):

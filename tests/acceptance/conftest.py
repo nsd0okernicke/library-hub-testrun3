@@ -25,9 +25,10 @@ from loans.infrastructure.api.main import create_app as create_loan_app
 from loans.infrastructure.db.loan_repository import SqlAlchemyLoanRepository
 from loans.infrastructure.db.models import Base as LoanBase
 from loans.infrastructure.db.user_repository import SqlAlchemyUserRepository
+from loans.infrastructure.events import InMemoryEventPublisher
 
 Catalog = namedtuple("Catalog", ["client", "repository", "session_factory"])
-Loans = namedtuple("Loans", ["client", "repository", "loan_repository"])
+Loans = namedtuple("Loans", ["client", "repository", "loan_repository", "publisher"])
 
 
 class StepContext:
@@ -134,7 +135,13 @@ async def loans(loans_postgres_container: PostgresContainer) -> Generator[Loans,
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     users_repository = SqlAlchemyUserRepository(sessions)
     loan_repository = SqlAlchemyLoanRepository(sessions)
-    app = create_loan_app(users_repository, loan_repository)
+    publisher = InMemoryEventPublisher()
+    app = create_loan_app(users_repository, loan_repository, publisher)
     with TestClient(app) as client:
-        yield Loans(client=client, repository=users_repository, loan_repository=loan_repository)
+        yield Loans(
+            client=client,
+            repository=users_repository,
+            loan_repository=loan_repository,
+            publisher=publisher,
+        )
     await engine.dispose()

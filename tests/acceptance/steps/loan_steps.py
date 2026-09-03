@@ -53,11 +53,18 @@ _LOAN_4_FEATURE_PATH = os.path.normpath(
     )
 )
 
+_LOAN_5_FEATURE_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "features", "loan-5-view-overdue-loans.feature"
+    )
+)
+
 scenarios(_FEATURE_PATH)
 scenarios(_LOAN_1_FEATURE_PATH)
 scenarios(_LOAN_2_FEATURE_PATH)
 scenarios(_LOAN_3_FEATURE_PATH)
 scenarios(_LOAN_4_FEATURE_PATH)
+scenarios(_LOAN_5_FEATURE_PATH)
 
 _PROBLEMS_BY_EMAIL = {
     'the email is "plainaddress" without an @ sign': "plainaddress",
@@ -605,9 +612,8 @@ def loans_requested_for_user_id(context: Any, user_id: str) -> None:
 def result_list_contains_in_order(context: Any, isbns: str) -> None:
     """Assert the returned isbns are exactly the quoted ones, in order."""
     expected = re.findall(r'"([^"]*)"', isbns)
-    body = context.response.json()
-    assert [item["isbn"] for item in body["items"]] == expected, (
-        [item["isbn"] for item in body["items"]],
+    assert [item["isbn"] for item in _result_items(context)] == expected, (
+        [item["isbn"] for item in _result_items(context)],
         expected,
     )
 
@@ -615,9 +621,8 @@ def result_list_contains_in_order(context: Any, isbns: str) -> None:
 @then(parse('the result list contains exactly "{isbn}"'))
 def result_list_contains_exactly_one(context: Any, isbn: str) -> None:
     """Assert the returned list holds exactly the one named isbn."""
-    body = context.response.json()
-    assert [item["isbn"] for item in body["items"]] == [isbn], (
-        [item["isbn"] for item in body["items"]],
+    assert [item["isbn"] for item in _result_items(context)] == [isbn], (
+        [item["isbn"] for item in _result_items(context)],
         isbn,
     )
 
@@ -625,8 +630,7 @@ def result_list_contains_exactly_one(context: Any, isbn: str) -> None:
 @then("the result list is empty")
 def result_list_empty(context: Any) -> None:
     """Assert the response carries no loan entries."""
-    body = context.response.json()
-    assert body["items"] == [], body["items"]
+    assert _result_items(context) == [], _result_items(context)
 
 
 @then(cfparse("the total count is {total:d}"))
@@ -668,6 +672,18 @@ def due_dates_follow_the_statuses(context: Any) -> None:
         else:
             assert item["status"] in ("PENDING", "REJECTED")
             assert item["due_date"] is None, item
+
+
+def _result_items(context: Any) -> list[dict[str, Any]]:
+    """Extract the result entries from the last loan list response.
+
+    Loan-3 answers ``{"items": [...]}`` with pagination metadata while
+    loan-5 answers a bare list; both shapes carry the entries the same way.
+    """
+    body = context.response.json()
+    if isinstance(body, list):
+        return body
+    return body["items"]
 
 
 # ---------------------------------------------------------------------------
@@ -751,3 +767,97 @@ def return_records_no_penalty(context: Any) -> None:
     assert loan is not None
     # The overdue due date is kept as-is: nothing about lateness is recorded.
     assert loan.due_date == date.today() - timedelta(days=10)
+
+
+# ---------------------------------------------------------------------------
+# loan-5-view-overdue-loans.feature: administrative overdue-loan list
+# ---------------------------------------------------------------------------
+
+
+_LOAN_5_SEED_COUNT = 0
+
+
+def _seed_loan_in_status_with_due_offset(
+    context: Any, user_id: str, isbn: str, status: str, days: int | None, direction: str | None
+) -> None:
+    """Persist a loan for the user in the given status.
+
+    ACTIVE and RETURNED loans carry a due date offset from the current day
+    by the given number of days; PENDING and REJECTED loans have no due
+    date, the way the loan lifecycle assigns them.
+    """
+    global _LOAN_5_SEED_COUNT
+    _LOAN_5_SEED_COUNT += 1
+    due: date | None = None
+    if days is not None:
+        offset = timedelta(days=days)
+        due = date.today() - offset if direction == "before" else date.today() + offset
+    loan = Loan(
+        loan_id=f"l5-{Isbn(isbn).digits}-{LoanStatus(status).value}-{_LOAN_5_SEED_COUNT}",
+        user_id=user_id,
+        isbn=Isbn(isbn),
+        requested_on=date.today() - timedelta(days=28),
+        status=LoanStatus(status),
+        due_date=due,
+    )
+    asyncio.run(context.loans.loan_repository.save(loan))
+
+
+@given(
+    re_parser(
+        r'the (?:user |user "(?P<name>[^"]+)" )has a loan for the book with isbn '
+        r'"(?P<isbn>[^"]+)" in status (?P<status>PENDING|ACTIVE|REJECTED|RETURNED)'
+        r"(?: whose due date is (?P<days>\d+) days (?P<direction>before|after) the current time)?"
+    )
+)
+def user_has_loan_with_due_offset(
+    context: Any,
+    name: str | None,
+    isbn: str,
+    status: str,
+    days: str | None,
+    direction: str | None,
+) -> None:
+    """Give a user a loan in the named status with a due date offset from now."""
+    user_id = context.users_by_name[name] if name else context.user_id
+    _seed_loan_in_status_with_due_offset(
+        context, user_id, isbn, status, int(days) if days else None, direction
+    )
+
+
+@when("the overdue loans are requested")
+def overdue_loans_requested(context: Any) -> None:
+    """Send the administrative overdue-loan list request."""
+    context.response = context.loans.client.get("/loans/overdue")
+
+
+def _entry_for_isbn(context: Any, isbn: str) -> dict[str, Any]:
+    """Find the response entry for the isbn, failing loudly if absent."""
+    items = _result_items(context)
+    matches = [item for item in items if item["isbn"] == isbn]
+    assert len(matches) == 1, (matches, isbn)
+    return matches[0]
+
+
+@then(
+    cfparse(
+        'the entry for "{isbn}" contains the loan id, the user id, '
+        'the isbn "{isbn}", the status {status}, the due date and the created_at'
+    )
+)
+def entry_contains_all_fields(context: Any, isbn: str, status: str) -> None:
+    """Assert the entry names every reported field with the named status."""
+    entry = _entry_for_isbn(context, isbn)
+    assert entry["loan_id"], entry
+    assert entry["user_id"], entry
+    assert entry["isbn"] == isbn, entry
+    assert entry["status"] == status, entry
+    assert entry["due_date"] is not None, entry
+    assert entry["created_at"], entry
+
+
+@then(cfparse('the entry for "{isbn}" belongs to the user "{name}"'))
+def entry_belongs_to_named_user(context: Any, isbn: str, name: str) -> None:
+    """Assert the entry's user id is the named user's."""
+    entry = _entry_for_isbn(context, isbn)
+    assert entry["user_id"] == context.users_by_name[name], entry

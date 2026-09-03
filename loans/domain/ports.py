@@ -5,6 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 
 from loans.domain.email import Email
+from loans.domain.loan import Loan
 from loans.domain.user import User
 
 
@@ -19,9 +20,32 @@ class UserRepository(ABC):
         """Return the user for the email, or None when not present."""
 
     @abstractmethod
+    async def get_by_id(self, user_id: str) -> User | None:
+        """Return the user for the system-generated user id, or None."""
+
+    @abstractmethod
     async def save(self, user: User) -> None:
         """Insert a new user into the account base."""
 
     @abstractmethod
     async def count(self) -> int:
         """Return the total number of users."""
+
+
+class LoanRepository(ABC):
+    """Persistence port for loan records.
+
+    Identity is the system-generated loan id.
+    """
+
+    @abstractmethod
+    async def get(self, loan_id: str) -> Loan | None:
+        """Return the loan for the loan id, or None when not present."""
+
+    @abstractmethod
+    async def save(self, loan: Loan) -> None:
+        """Insert or update a loan record."""
+
+    @abstractmethod
+    async def count(self) -> int:
+        """Return the total number of loans."""

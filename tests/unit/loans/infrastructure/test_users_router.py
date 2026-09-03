@@ -5,12 +5,12 @@ from starlette.testclient import TestClient
 
 from loans.domain.ports import UserRepository
 from loans.infrastructure.api.main import create_app
-from tests.unit.loans.fakes import InMemoryUsers
+from tests.unit.loans.fakes import InMemoryLoans, InMemoryUsers
 
 
 def make_client(repo: UserRepository) -> TestClient:
     """Build a TestClient around the loan app wired to the given repo."""
-    return TestClient(create_app(repo))
+    return TestClient(create_app(repo, InMemoryLoans()))
 
 
 def test_create_user_returns_201_and_user() -> None:

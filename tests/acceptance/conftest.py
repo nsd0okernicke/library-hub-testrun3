@@ -68,6 +68,12 @@ def request_accepted(context: Any) -> None:
     assert context.response.status_code == 202, context.response.text
 
 
+@then("the request succeeds with a 200 OK")
+def request_ok(context: Any) -> None:
+    """Assert the last request returned 200 OK."""
+    assert context.response.status_code == 200, context.response.text
+
+
 @then("the request is rejected with a 404 Not Found")
 def request_not_found(context: Any) -> None:
     """Assert the last request returned 404 Not Found."""

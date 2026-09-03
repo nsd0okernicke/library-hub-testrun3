@@ -13,6 +13,7 @@ from loans.application.borrow_book import BorrowBook
 from loans.application.create_user import CreateUser
 from loans.application.return_book import ReturnBook
 from loans.application.settle_reservation import FulfillReservation, RejectReservation
+from loans.application.view_overdue_loans import ViewOverdueLoans
 from loans.application.view_user_loans import ViewUserLoans
 from loans.domain.email import EmailValidationError
 from loans.domain.exceptions import (
@@ -52,6 +53,7 @@ def create_app(
     app.state.fulfill_reservation = FulfillReservation(loans)
     app.state.reject_reservation = RejectReservation(loans)
     app.state.view_user_loans = ViewUserLoans(users, loans)
+    app.state.view_overdue_loans = ViewOverdueLoans(loans)
     app.state.return_book = ReturnBook(loans, app.state.publisher)
     app.state.loan_repository = loans
     app.include_router(users_router)

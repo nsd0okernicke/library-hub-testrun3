@@ -32,8 +32,15 @@ _LOAN_1_FEATURE_PATH = os.path.normpath(
     )
 )
 
+_LOAN_2_FEATURE_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "features", "loan-2-view-single-loan.feature"
+    )
+)
+
 scenarios(_FEATURE_PATH)
 scenarios(_LOAN_1_FEATURE_PATH)
+scenarios(_LOAN_2_FEATURE_PATH)
 
 _PROBLEMS_BY_EMAIL = {
     'the email is "plainaddress" without an @ sign': "plainaddress",
@@ -389,3 +396,79 @@ def no_loan_created(context: Any) -> None:
     """Assert the rejected request left the loan store size unchanged."""
     after = asyncio.run(context.loans.loan_repository.count())
     assert after == context.loan_count_before
+
+
+# ---------------------------------------------------------------------------
+# loan-2-view-single-loan.feature: single-loan lookup by opaque loan id
+# ---------------------------------------------------------------------------
+
+
+async def _create_loan_in_status(context: Any, isbn: str, status: str) -> None:
+    """Create the user's loan for the isbn and drive it to the given status.
+
+    The loan is created through the borrow API and then moved to the named
+    status by the same production transitions the service itself uses:
+    reservation outcomes through their endpoints, the return through the
+    Loan domain entity persisted via the repository port.
+    """
+    context.borrow_date = date.today()
+    response = context.loans.client.post("/loans", json={"user_id": context.user_id, "isbn": isbn})
+    assert response.status_code == 202, response.text
+    context.loan_id = response.json()["loan_id"]
+
+    if status == "PENDING":
+        return
+    if status in ("ACTIVE", "RETURNED"):
+        await _settle_reservation(context, isbn, "fulfilled")
+    else:  # REJECTED
+        await _settle_reservation(context, isbn, "rejected")
+
+    if status == "RETURNED":
+        repository: LoanRepository = context.loans.loan_repository
+        loan = await repository.get(context.loan_id)
+        assert loan is not None, f"loan {context.loan_id} not found"
+        loan.mark_returned()
+        await repository.save(loan)
+
+
+@given(cfparse('the user has a loan for the book with isbn "{isbn}" in status {status}'))
+def user_has_loan_in_status(context: Any, isbn: str, status: str) -> None:
+    """Give the user a loan for the isbn already in the named status."""
+    asyncio.run(_create_loan_in_status(context, isbn, status))
+
+
+@when("the loan is requested by its loan id")
+def loan_requested_by_its_id(context: Any) -> None:
+    """Send a GET for the loan created by the last given step."""
+    context.response = context.loans.client.get(f"/loans/{context.loan_id}")
+
+
+@when(cfparse('the loan with loan id "{loan_id}" is requested'))
+def loan_requested_by_given_id(context: Any, loan_id: str) -> None:
+    """Send a GET for the literally named loan id."""
+    context.response = context.loans.client.get(f"/loans/{loan_id}")
+
+
+@then(
+    cfparse(
+        'the response contains the loan id, the user id, the isbn "{isbn}" and the status {status}'
+    )
+)
+def loan_response_contains_details(context: Any, isbn: str, status: str) -> None:
+    """Assert the 200 body names the loan, its user, its isbn and its status."""
+    body = context.response.json()
+    assert body["loan_id"] == context.loan_id
+    assert body["user_id"] == context.user_id
+    assert body["isbn"] == isbn
+    assert body["status"] == status
+
+
+@then(cfparse("its due date is {due_date}"))
+def loan_response_due_date(context: Any, due_date: str) -> None:
+    """Assert the due date is absent or the borrow date plus the loan term."""
+    body = context.response.json()
+    if due_date == "absent":
+        assert body["due_date"] is None, body["due_date"]
+        return
+    assert due_date == "28 days after the borrow request"
+    assert body["due_date"] == (context.borrow_date + timedelta(days=28)).isoformat()

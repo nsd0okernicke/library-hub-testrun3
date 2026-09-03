@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Query, Request
 
+from catalog.application.check_book_availability import CheckBookAvailability
 from catalog.application.create_book import CreateBook, CreateBookCommand
 from catalog.application.retrieve_book import RetrieveBook
 from catalog.application.search_books import SearchBooks
@@ -81,3 +82,15 @@ async def retrieve_book(isbn: str, request: Request) -> dict[str, object]:
     payload = _book_payload(await use_case.execute(isbn))
     payload["isbn"] = isbn
     return payload
+
+
+@router.get("/books/{isbn}/availability")
+async def check_book_availability(isbn: str, request: Request) -> dict[str, object]:
+    """Return only the ISBN and available count for a single book.
+
+    The ISBN is echoed in the format the client requested; the catalog keys
+    books by their 13-digit form, so hyphenation is display-only.
+    """
+    use_case: CheckBookAvailability = request.app.state.check_book_availability
+    status = await use_case.execute(isbn)
+    return {"isbn": status.isbn, "available_count": status.available_count}

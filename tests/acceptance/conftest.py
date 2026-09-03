@@ -22,11 +22,12 @@ from catalog.infrastructure.api.main import create_app
 from catalog.infrastructure.db.book_repository import SqlAlchemyBookRepository
 from catalog.infrastructure.db.models import Base
 from loans.infrastructure.api.main import create_app as create_loan_app
+from loans.infrastructure.db.loan_repository import SqlAlchemyLoanRepository
 from loans.infrastructure.db.models import Base as LoanBase
 from loans.infrastructure.db.user_repository import SqlAlchemyUserRepository
 
-Catalog = namedtuple("Catalog", ["client", "repository"])
-Loans = namedtuple("Loans", ["client", "repository"])
+Catalog = namedtuple("Catalog", ["client", "repository", "session_factory"])
+Loans = namedtuple("Loans", ["client", "repository", "loan_repository"])
 
 
 class StepContext:
@@ -61,6 +62,18 @@ def request_bad_request(context: Any) -> None:
     assert context.response.status_code == 400, context.response.text
 
 
+@then("the request succeeds with a 202 Accepted")
+def request_accepted(context: Any) -> None:
+    """Assert the last request returned 202 Accepted."""
+    assert context.response.status_code == 202, context.response.text
+
+
+@then("the request is rejected with a 404 Not Found")
+def request_not_found(context: Any) -> None:
+    """Assert the last request returned 404 Not Found."""
+    assert context.response.status_code == 404, context.response.text
+
+
 @pytest.fixture(scope="session")
 def postgres_container() -> Generator[PostgresContainer, None, None]:
     """Session-scoped PostgreSQL container shared by all scenarios."""
@@ -89,16 +102,17 @@ async def catalog(postgres_container: PostgresContainer) -> Generator[Catalog, N
         await conn.run_sync(Base.metadata.create_all)
         await conn.execute(Base.metadata.tables["books"].delete())
 
-    repository = SqlAlchemyBookRepository(async_sessionmaker(engine, expire_on_commit=False))
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    repository = SqlAlchemyBookRepository(sessions)
     app = create_app(repository)
     with TestClient(app) as client:
-        yield Catalog(client=client, repository=repository)
+        yield Catalog(client=client, repository=repository, session_factory=sessions)
     await engine.dispose()
 
 
 @pytest.fixture()
 async def loans(loans_postgres_container: PostgresContainer) -> Generator[Loans, None, None]:
-    """Function-scoped loan app with a freshly created, empty users table."""
+    """Function-scoped loan app with freshly created, empty users and loans tables."""
     host = loans_postgres_container.get_container_host_ip()
     port = loans_postgres_container.get_exposed_port(5432)
     url = (
@@ -109,9 +123,12 @@ async def loans(loans_postgres_container: PostgresContainer) -> Generator[Loans,
     async with engine.begin() as conn:
         await conn.run_sync(LoanBase.metadata.create_all)
         await conn.execute(LoanBase.metadata.tables["users"].delete())
+        await conn.execute(LoanBase.metadata.tables["loans"].delete())
 
-    repository = SqlAlchemyUserRepository(async_sessionmaker(engine, expire_on_commit=False))
-    app = create_loan_app(repository)
+    sessions = async_sessionmaker(engine, expire_on_commit=False)
+    users_repository = SqlAlchemyUserRepository(sessions)
+    loan_repository = SqlAlchemyLoanRepository(sessions)
+    app = create_loan_app(users_repository, loan_repository)
     with TestClient(app) as client:
-        yield Loans(client=client, repository=repository)
+        yield Loans(client=client, repository=users_repository, loan_repository=loan_repository)
     await engine.dispose()

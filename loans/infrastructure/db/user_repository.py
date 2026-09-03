@@ -30,6 +30,13 @@ class SqlAlchemyUserRepository(UserRepository):
             row = result.scalar_one_or_none()
             return _to_domain(row) if row is not None else None
 
+    async def get_by_id(self, user_id: str) -> User | None:
+        """Return the user for the system-generated user id, or None."""
+        async with self._sessions() as session:
+            result = await session.execute(select(UserRow).where(UserRow.user_id == user_id))
+            row = result.scalar_one_or_none()
+            return _to_domain(row) if row is not None else None
+
     async def save(self, user: User) -> None:
         """Insert a new user into the account base."""
         row = UserRow(user_id=user.user_id, name=user.name, email=user.email.value)

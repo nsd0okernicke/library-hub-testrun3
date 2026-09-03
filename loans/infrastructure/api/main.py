@@ -12,8 +12,13 @@ from sqlalchemy.pool import NullPool
 from loans.application.borrow_book import BorrowBook
 from loans.application.create_user import CreateUser
 from loans.application.settle_reservation import FulfillReservation, RejectReservation
+from loans.application.view_user_loans import ViewUserLoans
 from loans.domain.email import EmailValidationError
-from loans.domain.exceptions import UnknownUserError, UserAlreadyExistsError
+from loans.domain.exceptions import (
+    InvalidLoanListParametersError,
+    UnknownUserError,
+    UserAlreadyExistsError,
+)
 from loans.domain.isbn import IsbnValidationError
 from loans.domain.loan import InvalidLoanDataError, LoanNotFoundError, LoanNotPendingError
 from loans.domain.ports import LoanRepository, UserRepository
@@ -34,6 +39,7 @@ def create_app(users: UserRepository, loans: LoanRepository) -> FastAPI:
     app.state.borrow_book = BorrowBook(users, loans)
     app.state.fulfill_reservation = FulfillReservation(loans)
     app.state.reject_reservation = RejectReservation(loans)
+    app.state.view_user_loans = ViewUserLoans(users, loans)
     app.state.loan_repository = loans
     app.include_router(users_router)
     app.include_router(loans_router)
@@ -58,6 +64,7 @@ def create_app(users: UserRepository, loans: LoanRepository) -> FastAPI:
     app.add_exception_handler(IsbnValidationError, bad_request_handler)
     app.add_exception_handler(InvalidUserDataError, bad_request_handler)
     app.add_exception_handler(InvalidLoanDataError, bad_request_handler)
+    app.add_exception_handler(InvalidLoanListParametersError, bad_request_handler)
     return app
 
 

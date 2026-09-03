@@ -49,3 +49,7 @@ class LoanRepository(ABC):
     @abstractmethod
     async def count(self) -> int:
         """Return the total number of loans."""
+
+    @abstractmethod
+    async def list_by_user(self, user_id: str) -> list[Loan]:
+        """Return every loan of the user, in any order."""

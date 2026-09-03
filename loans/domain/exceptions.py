@@ -12,6 +12,10 @@ class UserAlreadyExistsError(Exception):
         self.email = email
 
 
+class InvalidLoanListParametersError(ValueError):
+    """Raised when a loan list request carries invalid pagination or user data."""
+
+
 class UnknownUserError(Exception):
     """Raised when a borrow request names a user id that does not exist."""
 

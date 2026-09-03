@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Query, Request
 
 from loans.application.borrow_book import BorrowBook, BorrowBookCommand
 from loans.application.settle_reservation import FulfillReservation, RejectReservation
+from loans.application.view_user_loans import ViewUserLoans
 from loans.domain.loan import Loan, LoanNotFoundError
+from loans.domain.loan_list import LoanListQuery
 from loans.infrastructure.api.schemas import LoanCreateRequest
 
 router = APIRouter()
@@ -20,6 +22,7 @@ def _loan_payload(loan: Loan) -> dict[str, object]:
         "isbn": loan.isbn.value,
         "status": loan.status.value,
         "due_date": loan.due_date.isoformat() if loan.due_date is not None else None,
+        "created_at": loan.requested_on.isoformat(),
     }
 
 
@@ -43,6 +46,29 @@ async def get_loan(loan_id: str, request: Request) -> dict[str, object]:
     if loan is None:
         raise LoanNotFoundError(loan_id)
     return _loan_payload(loan)
+
+
+@router.get("/users/{user_id}/loans")
+async def view_user_loans(
+    user_id: str,
+    request: Request,
+    page: int = Query(default=1),
+    page_size: int = Query(default=20),
+) -> dict[str, object]:
+    """Return one page of the user's loans, newest first.
+
+    All four statuses appear; ``total`` counts every loan of the user, not
+    only this page. A user id naming no account is a 404; ``page`` and
+    ``page_size`` outside their valid range are 400 Bad Request.
+    """
+    use_case: ViewUserLoans = request.app.state.view_user_loans
+    result = await use_case.execute(LoanListQuery(user_id=user_id, page=page, page_size=page_size))
+    return {
+        "items": [_loan_payload(loan) for loan in result.items],
+        "total": result.total,
+        "page": result.page,
+        "page_size": result.page_size,
+    }
 
 
 @router.post("/loans/{loan_id}/reservation/fulfilled")

@@ -160,12 +160,6 @@ def book_requested_with_problem(context: Any, problem: str) -> None:
     _post_book(context, payload)
 
 
-@then("the request succeeds with a 201 Created")
-def request_succeeded(context: Any) -> None:
-    """Assert the create-book request returned 201 Created."""
-    assert context.response.status_code == 201, context.response.text
-
-
 @then(cfparse('a book with isbn "{isbn}" exists in the catalog'))
 def book_exists(context: Any, isbn: str) -> None:
     """Assert the catalog now holds a book with this ISBN."""
@@ -203,12 +197,6 @@ def book_description_matches(context: Any, description: str) -> None:
     assert _requested_book(context).description == description
 
 
-@then("the request is rejected with a 409 Conflict")
-def request_conflict(context: Any) -> None:
-    """Assert the create-book request returned 409 Conflict."""
-    assert context.response.status_code == 409, context.response.text
-
-
 @then(cfparse('the catalog contains exactly one book with isbn "{isbn}"'))
 def exactly_one_book_with_isbn(context: Any, isbn: str) -> None:
     """Assert the pre-existing book survived and no second one was added.
@@ -218,12 +206,6 @@ def exactly_one_book_with_isbn(context: Any, isbn: str) -> None:
     """
     book = asyncio.run(context.catalog.repository.get_by_isbn(Isbn(isbn)))
     assert book is not None
-
-
-@then("the request is rejected with a 400 Bad Request")
-def request_bad_request(context: Any) -> None:
-    """Assert the create-book request returned 400 Bad Request."""
-    assert context.response.status_code == 400, context.response.text
 
 
 @given(

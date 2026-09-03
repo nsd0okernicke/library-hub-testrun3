@@ -42,7 +42,10 @@ include = ["catalog", "catalog.*", "loans", "loans.*", "users", "users.*"]
 testpaths = ["tests"]
 python_files = ["test_*.py", "*_steps.py"]
 asyncio_mode = "auto"
-markers = ["catalog: scenarios for the catalog service"]
+markers = [
+        "catalog: scenarios for the catalog service",
+        "loans: scenarios for the loan service",
+    ]
 
 [tool.mypy]
 strict = true
@@ -60,7 +63,8 @@ exclude_dirs = ["tests"]
 skips = ["B101"]
 
 [tool.importlinter]
-root_packages = ["catalog"]
+root_packages = ["catalog", "loans"]
 contracts = [
     { name = "Catalog dependency direction: infrastructure -> application -> domain", type = "layers", layers = ["catalog.infrastructure", "catalog.application", "catalog.domain"] },
+    { name = "Loans dependency direction: infrastructure -> application -> domain", type = "layers", layers = ["loans.infrastructure", "loans.application", "loans.domain"] },
 ]

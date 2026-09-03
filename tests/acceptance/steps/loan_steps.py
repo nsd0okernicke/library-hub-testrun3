@@ -4,11 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import os
-from datetime import date, timedelta
+import re
+from datetime import date, datetime, timedelta
 from typing import Any
 
 from pytest_bdd import given, scenarios, then, when
-from pytest_bdd.parsers import cfparse
+from pytest_bdd.parsers import cfparse, parse
 from sqlalchemy import update
 from starlette.testclient import TestClient
 
@@ -38,9 +39,16 @@ _LOAN_2_FEATURE_PATH = os.path.normpath(
     )
 )
 
+_LOAN_3_FEATURE_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "features", "loan-3-view-user-loans.feature"
+    )
+)
+
 scenarios(_FEATURE_PATH)
 scenarios(_LOAN_1_FEATURE_PATH)
 scenarios(_LOAN_2_FEATURE_PATH)
+scenarios(_LOAN_3_FEATURE_PATH)
 
 _PROBLEMS_BY_EMAIL = {
     'the email is "plainaddress" without an @ sign': "plainaddress",
@@ -168,10 +176,19 @@ def catalog_service_running(context: Any, catalog: Any) -> None:
 
 @given(cfparse('a user with name "{name}" and email "{email}"'))
 def user_created(context: Any, name: str, email: str) -> None:
-    """Create the scenario's user through the users API and remember its id."""
+    """Create the scenario's user through the users API and remember its id.
+
+    The first user created becomes the scenario user (``context.user_id``);
+    later users are only tracked by name so that "the user" still refers to
+    the one the background introduced.
+    """
     response = context.loans.client.post("/users", json={"name": name, "email": email})
     assert response.status_code == 201, response.text
-    context.user_id = response.json()["user_id"]
+    user_id = response.json()["user_id"]
+    if not getattr(context, "user_id", None):
+        context.user_id = user_id
+    context.users_by_name = getattr(context, "users_by_name", {})
+    context.users_by_name[name] = user_id
 
 
 @given(cfparse('a book with isbn "{isbn}" and initial stock {stock:d}'))
@@ -472,3 +489,168 @@ def loan_response_due_date(context: Any, due_date: str) -> None:
         return
     assert due_date == "28 days after the borrow request"
     assert body["due_date"] == (context.borrow_date + timedelta(days=28)).isoformat()
+
+
+# ---------------------------------------------------------------------------
+# loan-3-view-user-loans.feature: paginated per-user loan list
+# ---------------------------------------------------------------------------
+
+
+def _seed_loan(context: Any, user_id: str, isbn: str, status: str, created_at: str) -> None:
+    """Persist a loan for the user with the given creation timestamp and status.
+
+    The created_at timestamp's date becomes the loan's creation date
+    (requested_on); the due date is that date plus the global loan term for
+    the fulfilled statuses, absent for PENDING and REJECTED.
+    """
+    created = datetime.fromisoformat(created_at)
+    status_enum = LoanStatus(status)
+    has_due = status_enum in (LoanStatus.ACTIVE, LoanStatus.RETURNED)
+    due = created.date() + timedelta(days=28) if has_due else None
+    loan = Loan(
+        loan_id=f"l3-{Isbn(isbn).digits}-{created.date().isoformat()}-{status}",
+        user_id=user_id,
+        isbn=Isbn(isbn),
+        requested_on=created.date(),
+        status=status_enum,
+        due_date=due,
+    )
+    asyncio.run(context.loans.loan_repository.save(loan))
+
+
+@given(
+    cfparse(
+        'the user has a loan for the book with isbn "{isbn}" '
+        "in status {status} created at {created_at}"
+    )
+)
+def user_has_loan_created_at(context: Any, isbn: str, status: str, created_at: str) -> None:
+    """Give the scenario user a loan for the isbn with a fixed creation date."""
+    _seed_loan(context, context.user_id, isbn, status, created_at)
+
+
+@given(
+    cfparse(
+        'the user "{name}" has a loan for the book with isbn "{isbn}" '
+        "in status {status} created at {created_at}"
+    )
+)
+def named_user_has_loan_created_at(
+    context: Any, name: str, isbn: str, status: str, created_at: str
+) -> None:
+    """Give the named user a loan for the isbn with a fixed creation date."""
+    user_id = context.users_by_name[name]
+    _seed_loan(context, user_id, isbn, status, created_at)
+
+
+def _request_loans(context: Any, user_id: str, page: int = 1, page_size: int = 20) -> None:
+    """Send GET /users/{user_id}/loans with the given pagination."""
+    context.response = context.loans.client.get(
+        f"/users/{user_id}/loans", params={"page": page, "page_size": page_size}
+    )
+
+
+@when("the user's loans are requested")
+def loans_requested(context: Any) -> None:
+    """Send a loan list request for the scenario user with default pagination."""
+    _request_loans(context, context.user_id)
+
+
+@when(cfparse("the user's loans are requested with page {page:d} and page size {page_size:d}"))
+def loans_requested_with_pagination(context: Any, page: int, page_size: int) -> None:
+    """Send a loan list request for the scenario user with named pagination."""
+    _request_loans(context, context.user_id, page, page_size)
+
+
+@when(cfparse("the user's loans are requested where {problem}"))
+def loans_requested_with_problem(context: Any, problem: str) -> None:
+    """Send a loan list request that violates exactly the named rule."""
+    page, page_size = 1, 20
+    if problem == "the page is 0":
+        page = 0
+    elif problem == "the page is -1":
+        page = -1
+    elif problem == "the page size is 0":
+        page_size = 0
+    elif problem == "the page size is -3":
+        page_size = -3
+    elif problem == "the page size is 101":
+        page_size = 101
+    else:
+        raise AssertionError(f"unknown problem: {problem!r}")
+    _request_loans(context, context.user_id, page, page_size)
+
+
+@when(cfparse('the loans of the user with user id "{user_id}" are requested'))
+def loans_requested_for_user_id(context: Any, user_id: str) -> None:
+    """Send a loan list request for a literally named user id."""
+    _request_loans(context, user_id)
+
+
+@then(cfparse("the result list contains exactly {isbns} in this order"))
+def result_list_contains_in_order(context: Any, isbns: str) -> None:
+    """Assert the returned isbns are exactly the quoted ones, in order."""
+    expected = re.findall(r'"([^"]*)"', isbns)
+    body = context.response.json()
+    assert [item["isbn"] for item in body["items"]] == expected, (
+        [item["isbn"] for item in body["items"]],
+        expected,
+    )
+
+
+@then(parse('the result list contains exactly "{isbn}"'))
+def result_list_contains_exactly_one(context: Any, isbn: str) -> None:
+    """Assert the returned list holds exactly the one named isbn."""
+    body = context.response.json()
+    assert [item["isbn"] for item in body["items"]] == [isbn], (
+        [item["isbn"] for item in body["items"]],
+        isbn,
+    )
+
+
+@then("the result list is empty")
+def result_list_empty(context: Any) -> None:
+    """Assert the response carries no loan entries."""
+    body = context.response.json()
+    assert body["items"] == [], body["items"]
+
+
+@then(cfparse("the total count is {total:d}"))
+def total_count_is(context: Any, total: int) -> None:
+    """Assert the response total matches the expected count."""
+    body = context.response.json()
+    assert body["total"] == total, body["total"]
+
+
+@then(cfparse("the response reports page {page:d} and page size {page_size:d}"))
+def response_reports_pagination(context: Any, page: int, page_size: int) -> None:
+    """Assert the response echoes the page and the page size applied."""
+    body = context.response.json()
+    assert body["page"] == page, body["page"]
+    assert body["page_size"] == page_size, body["page_size"]
+
+
+@then(
+    "each result entry contains the loan id, the user id, the isbn, "
+    "the status, the due date and the created_at"
+)
+def result_entries_contain_all_fields(context: Any) -> None:
+    """Assert every entry names all of the loan's reported fields."""
+    body = context.response.json()
+    for item in body["items"]:
+        for key in ("loan_id", "user_id", "isbn", "status", "due_date", "created_at"):
+            assert key in item, (key, item)
+
+
+@then(
+    "the ACTIVE and RETURNED loans have a due date while the PENDING and REJECTED loans have none"
+)
+def due_dates_follow_the_statuses(context: Any) -> None:
+    """Assert the due date is present exactly for the fulfilled statuses."""
+    body = context.response.json()
+    for item in body["items"]:
+        if item["status"] in ("ACTIVE", "RETURNED"):
+            assert item["due_date"] is not None, item
+        else:
+            assert item["status"] in ("PENDING", "REJECTED")
+            assert item["due_date"] is None, item

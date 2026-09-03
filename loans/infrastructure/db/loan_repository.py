@@ -61,3 +61,9 @@ class SqlAlchemyLoanRepository(LoanRepository):
         async with self._sessions() as session:
             result = await session.scalar(select(func.count()).select_from(LoanRow))
             return int(result or 0)
+
+    async def list_by_user(self, user_id: str) -> list[Loan]:
+        """Return every loan of the user, in storage order."""
+        async with self._sessions() as session:
+            result = await session.execute(select(LoanRow).where(LoanRow.user_id == user_id))
+            return [_to_domain(row) for row in result.scalars()]

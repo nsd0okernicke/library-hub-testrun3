@@ -28,3 +28,10 @@ def test_user_holds_identity_name_and_email() -> None:
 def test_user_rejects_empty_required_fields(overrides: dict[str, object]) -> None:
     with pytest.raises(InvalidUserDataError):
         make_user(**overrides)
+
+
+def test_user_rejects_unknown_attributes() -> None:
+    """User carries exactly its identity fields; no stray state may accumulate."""
+    user = make_user()
+    with pytest.raises(AttributeError):
+        user.phone = "012345"

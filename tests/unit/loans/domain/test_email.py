@@ -36,3 +36,18 @@ def test_invalid_emails_are_rejected(value: str) -> None:
 def test_invalid_email_message_names_the_offending_value() -> None:
     with pytest.raises(EmailValidationError, match="plainaddress"):
         Email("plainaddress")
+
+
+def test_email_value_cannot_be_mutated() -> None:
+    """A value object is immutable: its validated value must not change."""
+    email = Email("a@b")
+    with pytest.raises(AttributeError):
+        email.value = "other@example.com"
+
+
+def test_email_rejects_unknown_attributes() -> None:
+    """Email carries exactly one field; no instance dict may accumulate state."""
+    email = Email("a@b")
+    assert not hasattr(email, "__dict__")
+    with pytest.raises(AttributeError):
+        email.domain = "example.com"

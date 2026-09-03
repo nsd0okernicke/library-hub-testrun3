@@ -1,0 +1,31 @@
+# Mutation testing session config for the loans service (architect's gate).
+#
+# Scope: domain/ + application/ only, per the quality-gate rule "mutation
+# score >= 80% on domain/ and application/".
+#
+# Exclusions, with rationale:
+# - loans/infrastructure/** — infra is excluded from the mutation gate by
+#   the constitution (unit tests mock ports; only slow acceptance tests
+#   exercise it). The glob must reach the .py files: cosmic-ray's
+#   excluded-modules subtracts exact path matches, so
+#   "loans/infrastructure/*" would only match the subdirectories.
+# - loans/domain/ports.py — interface-only module: zero executable
+#   statements. cosmic-ray generates mutants only for annotations (never
+#   evaluated under PEP 563) and @abstractmethod decorators; all are
+#   equivalent mutants. The port's contract is covered by the
+#   unit/acceptance suites instead.
+#
+# Run from the worktree root:
+#   <project_root>/.venv/Scripts/cosmic-ray init mutation-loans.toml mutation-loans.sqlite
+#   <project_root>/.venv/Scripts/cosmic-ray exec mutation-loans.toml mutation-loans.sqlite
+#   <project_root>/.venv/Scripts/cr-rate --fail-over 20 mutation-loans.sqlite
+# Delete mutation-loans.sqlite (and any mutant working copies) before re-running.
+
+[cosmic-ray]
+module-path = "loans"
+timeout = 60.0
+excluded-modules = ["loans/infrastructure/**/*.py", "loans/domain/ports.py"]
+test-command = "C:/projekte/agentic-coding/library-hub-testrun3/.venv/Scripts/python -m pytest tests/unit -x -q"
+
+[cosmic-ray.distributor]
+name = "local"

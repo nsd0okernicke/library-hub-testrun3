@@ -26,3 +26,7 @@ class BookRepository(ABC):
     @abstractmethod
     async def count(self) -> int:
         """Return the total number of books in the catalog."""
+
+    @abstractmethod
+    async def list_all(self) -> list[Book]:
+        """Return every book currently in the catalog."""

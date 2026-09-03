@@ -13,7 +13,7 @@ from pytest_bdd.parsers import re as re_parser
 from starlette.testclient import TestClient
 
 from catalog.domain.book import Book
-from catalog.domain.isbn import Isbn
+from catalog.domain.isbn import Isbn, IsbnValidationError
 from catalog.domain.ports import BookRepository
 
 _FEATURE_PATH = os.path.normpath(
@@ -50,10 +50,17 @@ _FEATURE_AVAILABILITY_PATH = os.path.normpath(
     )
 )
 
+_FEATURE_RETURNED_PATH = os.path.normpath(
+    os.path.join(
+        os.path.dirname(__file__), "..", "..", "..", "features", "cat-4-book-returned-stock.feature"
+    )
+)
+
 scenarios(_FEATURE_PATH)
 scenarios(_FEATURE_RETRIEVE_PATH)
 scenarios(_FEATURE_SEARCH_PATH)
 scenarios(_FEATURE_AVAILABILITY_PATH)
+scenarios(_FEATURE_RETURNED_PATH)
 
 
 def _post_book(context: Any, payload: dict[str, object]) -> None:
@@ -190,8 +197,13 @@ def book_exists(context: Any, isbn: str) -> None:
 
 @then(cfparse('its title is "{title}" and its author is "{author}" and its genre is "{genre}"'))
 def book_fields_match(context: Any, title: str, author: str, genre: str) -> None:
-    """Assert the stored metadata matches the request."""
-    book = _requested_book(context)
+    """Assert the stored metadata matches the request or the book under test."""
+    isbn = getattr(context, "current_isbn", None)
+    if isbn is not None:
+        book = asyncio.run(context.catalog.repository.get_by_isbn(Isbn(isbn)))
+        assert book is not None, f"book {isbn} not found"
+    else:
+        book = _requested_book(context)
     assert book.title == title
     assert book.author == author
     assert book.genre == genre
@@ -462,3 +474,48 @@ def response_reports_pagination(context: Any, page: int, page_size: int) -> None
     body = context.response.json()
     assert body["page"] == page, context.response.text
     assert body["page_size"] == page_size, context.response.text
+
+
+# ---------------------------------------------------------------------------
+# cat-4-book-returned-stock.feature: stock increment per BookReturned event
+# ---------------------------------------------------------------------------
+
+
+@given("the message broker is running")
+def message_broker_running(context: Any) -> None:
+    """Record the broker precondition; events are fed to the consumer directly."""
+    context.broker_running = True
+
+
+@when(cfparse('a BookReturned event for the isbn "{isbn}" is received'))
+def book_returned_event_received(context: Any, isbn: str) -> None:
+    """Deliver one BookReturned broker message for the given ISBN."""
+    consumer = context.catalog.consumer
+    asyncio.run(consumer.on_message({"loan_id": "L1", "user_id": "U1", "isbn": isbn}))
+
+
+@when(cfparse('{count:d} BookReturned events for the isbn "{isbn}" are received'))
+def book_returned_events_received(context: Any, count: int, isbn: str) -> None:
+    """Deliver the given number of BookReturned broker messages, in order."""
+    consumer = context.catalog.consumer
+    for _ in range(count):
+        asyncio.run(consumer.on_message({"loan_id": "L1", "user_id": "U1", "isbn": isbn}))
+
+
+@then(cfparse('the available stock of the book with isbn "{isbn}" is {stock:d}'))
+def available_stock_of_book_is(context: Any, isbn: str, stock: int) -> None:
+    """Assert the stored available stock of the named book."""
+    context.current_isbn = isbn
+    book = asyncio.run(context.catalog.repository.get_by_isbn(Isbn(isbn)))
+    assert book is not None, f"book {isbn} not found"
+    assert book.available_stock == stock
+
+
+@then(cfparse('the catalog contains no book with isbn "{isbn}"'))
+def catalog_contains_no_book_with_isbn(context: Any, isbn: str) -> None:
+    """Assert no book with the named ISBN exists; invalid formats cannot exist."""
+    try:
+        isbn_value = Isbn(isbn)
+    except IsbnValidationError:
+        return
+    assert asyncio.run(context.catalog.repository.get_by_isbn(isbn_value)) is None

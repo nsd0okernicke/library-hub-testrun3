@@ -21,13 +21,14 @@ from testcontainers.community.postgres import PostgresContainer
 from catalog.infrastructure.api.main import create_app
 from catalog.infrastructure.db.book_repository import SqlAlchemyBookRepository
 from catalog.infrastructure.db.models import Base
+from catalog.infrastructure.messaging.book_returned_consumer import BookReturnedConsumer
 from loans.infrastructure.api.main import create_app as create_loan_app
 from loans.infrastructure.db.loan_repository import SqlAlchemyLoanRepository
 from loans.infrastructure.db.models import Base as LoanBase
 from loans.infrastructure.db.user_repository import SqlAlchemyUserRepository
 from loans.infrastructure.events import InMemoryEventPublisher
 
-Catalog = namedtuple("Catalog", ["client", "repository", "session_factory"])
+Catalog = namedtuple("Catalog", ["client", "repository", "session_factory", "consumer"])
 Loans = namedtuple("Loans", ["client", "repository", "loan_repository", "publisher"])
 
 
@@ -112,8 +113,14 @@ async def catalog(postgres_container: PostgresContainer) -> Generator[Catalog, N
     sessions = async_sessionmaker(engine, expire_on_commit=False)
     repository = SqlAlchemyBookRepository(sessions)
     app = create_app(repository)
+    consumer = BookReturnedConsumer(app.state.handle_book_returned)
     with TestClient(app) as client:
-        yield Catalog(client=client, repository=repository, session_factory=sessions)
+        yield Catalog(
+            client=client,
+            repository=repository,
+            session_factory=sessions,
+            consumer=consumer,
+        )
     await engine.dispose()
 
 

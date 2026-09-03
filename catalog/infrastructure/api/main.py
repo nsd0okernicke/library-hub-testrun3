@@ -11,8 +11,13 @@ from sqlalchemy.pool import NullPool
 
 from catalog.application.create_book import CreateBook
 from catalog.application.retrieve_book import RetrieveBook
+from catalog.application.search_books import SearchBooks
 from catalog.domain.book import InvalidBookDataError
-from catalog.domain.exceptions import BookAlreadyExistsError, BookNotFoundError
+from catalog.domain.exceptions import (
+    BookAlreadyExistsError,
+    BookNotFoundError,
+    InvalidSearchParametersError,
+)
 from catalog.domain.isbn import IsbnValidationError
 from catalog.domain.ports import BookRepository
 from catalog.infrastructure.api.routers.books import router as books_router
@@ -27,6 +32,7 @@ def create_app(books: BookRepository) -> FastAPI:
     app = FastAPI(title="Catalog Service")
     app.state.create_book = CreateBook(books)
     app.state.retrieve_book = RetrieveBook(books)
+    app.state.search_books = SearchBooks(books)
     app.include_router(books_router)
 
     async def conflict_handler(request: Request, exc: Exception) -> JSONResponse:
@@ -45,6 +51,7 @@ def create_app(books: BookRepository) -> FastAPI:
     app.add_exception_handler(BookNotFoundError, not_found_handler)
     app.add_exception_handler(IsbnValidationError, bad_request_handler)
     app.add_exception_handler(InvalidBookDataError, bad_request_handler)
+    app.add_exception_handler(InvalidSearchParametersError, bad_request_handler)
     return app
 
 

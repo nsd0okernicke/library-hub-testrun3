@@ -1,4 +1,4 @@
-"""Unit tests for the loans HTTP API (POST /loans and reservation outcomes)."""
+"""Unit tests for the loans HTTP API (POST /loans, reservation outcomes, loan list)."""
 
 import asyncio
 from datetime import date, timedelta
@@ -7,6 +7,8 @@ import pytest
 from starlette.testclient import TestClient
 
 from loans.domain.email import Email
+from loans.domain.isbn import Isbn
+from loans.domain.loan import Loan, LoanStatus
 from loans.domain.user import User
 from loans.infrastructure.api.main import create_app
 from tests.unit.loans.fakes import InMemoryLoans, InMemoryUsers
@@ -20,8 +22,12 @@ def make_client(users: InMemoryUsers, loans: InMemoryLoans) -> TestClient:
 
 
 def seed_user(users: InMemoryUsers, user_id: str = "user-1") -> User:
-    """Persist a known user and return it."""
-    user = User(user_id=user_id, name="Anna Schmidt", email=Email("a@example.com"))
+    """Persist a known user and return it.
+
+    The email derives from the user id so two seeded users never collide on
+    the account identity.
+    """
+    user = User(user_id=user_id, name="Anna Schmidt", email=Email(f"{user_id}@example.com"))
     asyncio.run(users.save(user))
     return user
 
@@ -202,3 +208,153 @@ def test_settling_a_settled_loan_returns_409() -> None:
     assert client.post(f"/loans/{loan_id}/reservation/rejected").status_code == 200
 
     assert client.post(f"/loans/{loan_id}/reservation/fulfilled").status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# GET /users/{user_id}/loans: paginated per-user loan list
+# ---------------------------------------------------------------------------
+
+
+def seed_loan(
+    loans: InMemoryLoans,
+    user_id: str,
+    isbn: str,
+    created: date,
+    status: LoanStatus,
+    loan_id: str,
+) -> None:
+    """Store a loan directly with a chosen creation date and status."""
+    fulfilled = status in (LoanStatus.ACTIVE, LoanStatus.RETURNED)
+    due = created + timedelta(days=28) if fulfilled else None
+    asyncio.run(
+        loans.save(
+            Loan(
+                loan_id=loan_id,
+                user_id=user_id,
+                isbn=Isbn(isbn),
+                requested_on=created,
+                status=status,
+                due_date=due,
+            )
+        )
+    )
+
+
+def seed_list_users_and_loans(users: InMemoryUsers, loans: InMemoryLoans) -> None:
+    """Seed user-1 with one loan per status on distinct dates, plus one for user-2."""
+    seed_user(users)
+    seed_loan(loans, "user-1", "978-0-20-163361-0", date(2026, 1, 4), LoanStatus.REJECTED, "L1")
+    seed_loan(loans, "user-1", "978-0-13-468599-1", date(2026, 1, 5), LoanStatus.ACTIVE, "L2")
+    seed_loan(loans, "user-1", "978-0-42-104410-0", date(2026, 1, 6), LoanStatus.PENDING, "L3")
+    seed_loan(loans, "user-1", "978-0-67-977354-9", date(2026, 1, 7), LoanStatus.RETURNED, "L4")
+    seed_user(users, user_id="user-2")
+    seed_loan(loans, "user-2", "978-0-13-468599-1", date(2026, 1, 7), LoanStatus.ACTIVE, "L5")
+
+
+def test_list_returns_newest_first_with_all_fields() -> None:
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_list_users_and_loans(users, loans)
+    client = make_client(users, loans)
+
+    response = client.get("/users/user-1/loans")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["total"] == 4
+    assert body["page"] == 1
+    assert body["page_size"] == 20
+    items = body["items"]
+    assert [item["isbn"] for item in items] == [
+        "978-0-67-977354-9",
+        "978-0-42-104410-0",
+        "978-0-13-468599-1",
+        "978-0-20-163361-0",
+    ]
+    for item in items:
+        for key in ("loan_id", "user_id", "isbn", "status", "due_date", "created_at"):
+            assert key in item, key
+    by_status = {item["status"]: item for item in items}
+    assert by_status["ACTIVE"]["due_date"] is not None
+    assert by_status["RETURNED"]["due_date"] is not None
+    assert by_status["PENDING"]["due_date"] is None
+    assert by_status["REJECTED"]["due_date"] is None
+
+
+def test_list_excludes_other_users_loans() -> None:
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_list_users_and_loans(users, loans)
+    client = make_client(users, loans)
+
+    response = client.get("/users/user-2/loans")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert [item["isbn"] for item in body["items"]] == ["978-0-13-468599-1"]
+    assert body["total"] == 1
+
+
+def test_list_user_without_loans_gets_empty_list() -> None:
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_user(users)
+    client = make_client(users, loans)
+
+    response = client.get("/users/user-1/loans")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["items"] == []
+    assert body["total"] == 0
+
+
+def test_list_unknown_user_returns_404() -> None:
+    client = make_client(InMemoryUsers(), InMemoryLoans())
+
+    assert client.get("/users/ghost/loans").status_code == 404
+
+
+def test_list_page_beyond_last_returns_empty_items_with_total_unchanged() -> None:
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_list_users_and_loans(users, loans)
+    client = make_client(users, loans)
+
+    response = client.get("/users/user-1/loans?page=5&page_size=1")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["items"] == []
+    assert body["total"] == 4
+    assert body["page"] == 5
+    assert body["page_size"] == 1
+
+
+def test_list_pages_walk_the_newest_first_order() -> None:
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_list_users_and_loans(users, loans)
+    client = make_client(users, loans)
+
+    seen = [
+        item["isbn"]
+        for page in (1, 2, 3, 4)
+        for item in client.get(f"/users/user-1/loans?page={page}&page_size=1").json()["items"]
+    ]
+
+    assert seen == [
+        "978-0-67-977354-9",
+        "978-0-42-104410-0",
+        "978-0-13-468599-1",
+        "978-0-20-163361-0",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("page", "page_size"),
+    [(0, 20), (-1, 20), (1, 0), (1, -3), (1, 101)],
+)
+def test_list_rejects_out_of_range_pagination_with_400(page: int, page_size: int) -> None:
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_list_users_and_loans(users, loans)
+    client = make_client(users, loans)
+
+    response = client.get(f"/users/user-1/loans?page={page}&page_size={page_size}")
+
+    assert response.status_code == 400, response.text

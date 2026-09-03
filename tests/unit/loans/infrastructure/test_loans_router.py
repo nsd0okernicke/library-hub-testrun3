@@ -111,6 +111,48 @@ def test_get_missing_loan_returns_404() -> None:
     assert client.get("/loans/missing").status_code == 404
 
 
+def _borrow(client: TestClient) -> str:
+    """Borrow the default isbn and return the new loan id."""
+    return client.post("/loans", json={"user_id": "user-1", "isbn": VALID_ISBN}).json()["loan_id"]
+
+
+def test_get_active_loan_returns_status_and_due_date() -> None:
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_user(users)
+    client = make_client(users, loans)
+    loan_id = _borrow(client)
+    client.post(f"/loans/{loan_id}/reservation/fulfilled")
+
+    response = client.get(f"/loans/{loan_id}")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "ACTIVE"
+    assert body["due_date"] == (date.today() + timedelta(days=28)).isoformat()
+
+
+def test_get_returned_loan_returns_returned_with_kept_due_date() -> None:
+    users, loans = InMemoryUsers(), InMemoryLoans()
+    seed_user(users)
+    client = make_client(users, loans)
+    loan_id = _borrow(client)
+    client.post(f"/loans/{loan_id}/reservation/fulfilled")
+
+    async def _return_loan() -> None:
+        loan = await loans.get(loan_id)
+        assert loan is not None
+        loan.mark_returned()
+        await loans.save(loan)
+
+    asyncio.run(_return_loan())
+    response = client.get(f"/loans/{loan_id}")
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["status"] == "RETURNED"
+    assert body["due_date"] == (date.today() + timedelta(days=28)).isoformat()
+
+
 def test_fulfill_reservation_activates_loan_with_due_date() -> None:
     users, loans = InMemoryUsers(), InMemoryLoans()
     seed_user(users)

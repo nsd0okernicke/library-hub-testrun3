@@ -45,6 +45,16 @@ def test_rejection_never_sets_a_due_date(requested_on) -> None:
     assert loan.due_date is None
 
 
+@given(_DATES)
+def test_return_keeps_the_due_date_set_at_fulfillment(requested_on) -> None:
+    """A returned loan keeps the due date set when it was fulfilled."""
+    loan = make_loan(requested_on)
+    loan.fulfill()
+    loan.mark_returned()
+    assert loan.status is LoanStatus.RETURNED
+    assert loan.due_date == requested_on + timedelta(days=LOAN_TERM_DAYS)
+
+
 @given(_DATES, st.sampled_from(["fulfill", "reject"]), st.sampled_from(["fulfill", "reject"]))
 def test_any_second_settlement_is_refused(requested_on, first: str, second: str) -> None:
     """Once settled by any outcome, further settlement is always refused."""
